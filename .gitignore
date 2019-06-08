@@ -43,6 +43,7 @@
 *.tab.[ch]
 *.tar
 *.xz
+*.dtbo
 Module.symvers
 modules.builtin
 
