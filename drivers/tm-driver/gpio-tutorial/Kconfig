@@ -1,0 +1,13 @@
+#
+# PHY
+#
+
+menu "tm-driver-tutorial"
+
+config GPIO_TM_DRIVER
+	bool "Custom GPIO Drivers Support"
+	help
+	  Custom GPIO Drivers Support
+
+
+endmenu

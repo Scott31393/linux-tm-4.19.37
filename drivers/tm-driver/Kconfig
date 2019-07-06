@@ -1,0 +1,9 @@
+#
+# TM-DRIVERS TUTORIAL
+#
+
+menu "tm-driver-tutorial"
+
+source "drivers/tm-driver/gpio-tutorial/Kconfig
+
+endmenu
