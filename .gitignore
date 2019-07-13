@@ -137,13 +137,3 @@ all.config
 # Kdevelop4
 *.kdev4
 
-##devtm
-#
-# Snap directory (tools)
-#
-tools/
-
-#
-# Snap directory (virt)
-#
-virt/
