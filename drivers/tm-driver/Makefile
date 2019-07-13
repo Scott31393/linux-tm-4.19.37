@@ -4,5 +4,5 @@
 #
 
 
-obj-$(CONFIG_GPIO_TM_DRIVER)	+= gpio-tutorial/	
-
+obj-$(CONFIG_GPIO_TM_DRIVER)		+= gpio-tutorial/	
+obj-$(CONFIG_ACDC_I2C_TM_DRIVER)	+= acdc-i2c-tutorial/

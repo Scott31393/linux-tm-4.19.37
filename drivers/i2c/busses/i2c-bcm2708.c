@@ -334,9 +334,11 @@ static int bcm2708_i2c_probe(struct platform_device *pdev)
 		if (!of_property_read_u32(pdev->dev.of_node,
 					"clock-frequency", &bus_clk_rate))
 			baud = bus_clk_rate;
-		else
+		else{
 			dev_warn(&pdev->dev,
 				"Could not read clock-frequency property\n");
+		}
+
 	}
 
 	if (baudrate)

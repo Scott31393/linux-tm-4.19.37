@@ -4,6 +4,7 @@
 
 menu "tm-driver-tutorial"
 
-source "drivers/tm-driver/gpio-tutorial/Kconfig
+source "drivers/tm-driver/gpio-tutorial/Kconfig"
+source "drivers/tm-driver/acdc-i2c-tutorial/Kconfig"
 
 endmenu

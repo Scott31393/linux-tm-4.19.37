@@ -444,6 +444,7 @@ static int bcm2835_i2c_probe(struct platform_device *pdev)
 	int ret;
 	struct i2c_adapter *adap;
 
+
 	i2c_dev = devm_kzalloc(&pdev->dev, sizeof(*i2c_dev), GFP_KERNEL);
 	if (!i2c_dev)
 		return -ENOMEM;
@@ -463,12 +464,15 @@ static int bcm2835_i2c_probe(struct platform_device *pdev)
 		return PTR_ERR(i2c_dev->clk);
 	}
 
+
 	ret = of_property_read_u32(pdev->dev.of_node, "clock-frequency",
 				   &i2c_dev->bus_clk_rate);
+	printk(KERN_ERR "12c1 bus_clk_rate %i\n", i2c_dev->bus_clk_rate);
 	if (ret < 0) {
 		dev_warn(&pdev->dev,
 			 "Could not read clock-frequency property\n");
 		i2c_dev->bus_clk_rate = 100000;
+		printk(KERN_ERR "12c1 bus_clk_rate %i\n", i2c_dev->bus_clk_rate);
 	}
 
 	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);

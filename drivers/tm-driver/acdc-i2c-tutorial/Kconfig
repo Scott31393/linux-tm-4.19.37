@@ -1,0 +1,6 @@
+config ACDC_I2C_TM_DRIVER
+	bool "Custom ACDC i2c Drivers Support for ads1115"
+	help
+	  Custom ACDC i2c Drivers Support for ads1115
+
+

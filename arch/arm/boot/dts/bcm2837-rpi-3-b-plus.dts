@@ -106,3 +106,21 @@
 	pinctrl-0 = <&uart1_gpio14>;
 	status = "okay";
 };
+
+
+&i2c1{
+	pinctrl-names = "default";
+	pinctrl-0 = <&i2c1_gpio2>;
+	status = "okay";
+	clock-frequency = <100000>;
+
+	acdc:ads1115 {
+		pinctrl-names = "default";
+		compatible = "ti,ads1115";
+		reg = <0x48>;
+		status = "okay";
+
+	};
+
+	
+};
