@@ -116,7 +116,7 @@
 
 	acdc:ads1115 {
 		pinctrl-names = "default";
-		compatible = "ti,ads1115";
+		compatible = "ti,ads1115-volt";
 		reg = <0x48>;
 		status = "okay";
 
