@@ -5,7 +5,8 @@
 
 
 #define ADS1115_CONV_REG 0x00
-
+#define ADS1115_CONFIG_REG 0x0001
+#define ADS1115_INIT_CONF 0xc101   
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)  \
   (byte & 0x80 ? '1' : '0'), \
@@ -40,11 +41,30 @@ static ssize_t ads1115_v_read(struct device *dev,
 
 }
 
+static ssize_t ads1115_config(struct device *dev,
+						struct device_attribute *attr,
+						char *buf)
+{
+	struct adc_ads1115 *adc = dev_get_drvdata(dev);
+	struct i2c_client *client = adc->client;
+	__s32 ret;
+
+	ret = i2c_smbus_write_byte_data(client, ADS1115_CONFIG_REG, ADS1115_INIT_CONF);
+	if(ret < 0){
+		return ret;
+	}
+
+	return sprintf(buf, "Initial Configuration is: %x",  ADS1115_INIT_CONF);
+}
+
 
 static DEVICE_ATTR(voltage,	S_IRUGO, ads1115_v_read, NULL);
+static DEVICE_ATTR(initconfig, S_IRUGO, ads1115_config, NULL);
 
 static struct attribute *ads1115_attributes[] = {
+
 	&dev_attr_voltage.attr,
+	&dev_attr_initconfig.attr,
 	NULL,
 };
 
