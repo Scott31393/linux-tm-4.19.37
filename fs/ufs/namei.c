@@ -43,7 +43,8 @@ static inline int ufs_add_nondir(struct dentry *dentry, struct inode *inode)
 		return 0;
 	}
 	inode_dec_link_count(inode);
-	discard_new_inode(inode);
+	unlock_new_inode(inode);
+	iput(inode);
 	return err;
 }
 
@@ -141,7 +142,8 @@ static int ufs_symlink (struct inode * dir, struct dentry * dentry,
 
 out_fail:
 	inode_dec_link_count(inode);
-	discard_new_inode(inode);
+	unlock_new_inode(inode);
+	iput(inode);
 	return err;
 }
 
@@ -196,7 +198,8 @@ static int ufs_mkdir(struct inode * dir, struct dentry * dentry, umode_t mode)
 out_fail:
 	inode_dec_link_count(inode);
 	inode_dec_link_count(inode);
-	discard_new_inode(inode);
+	unlock_new_inode(inode);
+	iput (inode);
 out_dir:
 	inode_dec_link_count(dir);
 	return err;

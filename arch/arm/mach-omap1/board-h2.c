@@ -274,7 +274,7 @@ static struct platform_device h2_kp_device = {
 	.resource	= h2_kp_resources,
 };
 
-static const struct gpio_led h2_gpio_led_pins[] = {
+static struct gpio_led h2_gpio_led_pins[] = {
 	{
 		.name		= "h2:red",
 		.default_trigger = "heartbeat",
@@ -357,7 +357,7 @@ static struct omap_usb_config h2_usb_config __initdata = {
 	.pins[1]	= 3,
 };
 
-static const struct omap_lcd_config h2_lcd_config __initconst = {
+static struct omap_lcd_config h2_lcd_config __initdata = {
 	.ctrl_name	= "internal",
 };
 

@@ -13,8 +13,6 @@
 #ifndef __OMAP_AES_H__
 #define __OMAP_AES_H__
 
-#include <crypto/engine.h>
-
 #define DST_MAXBURST			4
 #define DMA_MIN				(DST_MAXBURST * sizeof(u32))
 
@@ -97,7 +95,6 @@ struct omap_aes_gcm_result {
 };
 
 struct omap_aes_ctx {
-	struct crypto_engine_ctx enginectx;
 	int		keylen;
 	u32		key[AES_KEYSIZE_256 / sizeof(u32)];
 	u8		nonce[4];

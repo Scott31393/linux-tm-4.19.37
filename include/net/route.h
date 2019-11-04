@@ -66,6 +66,8 @@ struct rtable {
 	u32			rt_mtu_locked:1,
 				rt_pmtu:31;
 
+	u32			rt_table_id;
+
 	struct list_head	rt_uncached;
 	struct uncached_list	*rt_uncached_list;
 };
@@ -216,7 +218,7 @@ unsigned int inet_addr_type_dev_table(struct net *net,
 				      const struct net_device *dev,
 				      __be32 addr);
 void ip_rt_multicast_event(struct in_device *);
-int ip_rt_ioctl(struct net *, unsigned int cmd, struct rtentry *rt);
+int ip_rt_ioctl(struct net *, unsigned int cmd, void __user *arg);
 void ip_rt_get_source(u8 *src, struct sk_buff *skb, struct rtable *rt);
 struct rtable *rt_dst_alloc(struct net_device *dev,
 			     unsigned int flags, u16 type,
@@ -225,10 +227,6 @@ struct rtable *rt_dst_alloc(struct net_device *dev,
 struct in_ifaddr;
 void fib_add_ifaddr(struct in_ifaddr *);
 void fib_del_ifaddr(struct in_ifaddr *, struct in_ifaddr *);
-void fib_modify_prefix_metric(struct in_ifaddr *ifa, u32 new_metric);
-
-void rt_add_uncached_list(struct rtable *rt);
-void rt_del_uncached_list(struct rtable *rt);
 
 static inline void ip_rt_put(struct rtable *rt)
 {

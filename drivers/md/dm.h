@@ -19,7 +19,6 @@
 #include <linux/hdreg.h>
 #include <linux/completion.h>
 #include <linux/kobject.h>
-#include <linux/refcount.h>
 
 #include "dm-stats.h"
 
@@ -39,7 +38,7 @@
  */
 struct dm_dev_internal {
 	struct list_head list;
-	refcount_t count;
+	atomic_t count;
 	struct dm_dev *dm_dev;
 };
 
@@ -49,6 +48,7 @@ struct dm_md_mempools;
 /*-----------------------------------------------------------------
  * Internal table functions.
  *---------------------------------------------------------------*/
+void dm_table_destroy(struct dm_table *t);
 void dm_table_event_callback(struct dm_table *t,
 			     void (*fn)(void *), void *context);
 struct dm_target *dm_table_get_target(struct dm_table *t, unsigned int index);
@@ -79,8 +79,6 @@ void dm_unlock_md_type(struct mapped_device *md);
 void dm_set_md_type(struct mapped_device *md, enum dm_queue_mode type);
 enum dm_queue_mode dm_get_md_type(struct mapped_device *md);
 struct target_type *dm_get_immutable_target_type(struct mapped_device *md);
-
-int dm_setup_md_queue(struct mapped_device *md, struct dm_table *t);
 
 /*
  * To check the return value from dm_table_find_target().
@@ -205,8 +203,7 @@ void dm_kcopyd_exit(void);
  * Mempool operations
  */
 struct dm_md_mempools *dm_alloc_md_mempools(struct mapped_device *md, enum dm_queue_mode type,
-					    unsigned integrity, unsigned per_bio_data_size,
-					    unsigned min_pool_size);
+					    unsigned integrity, unsigned per_bio_data_size);
 void dm_free_md_mempools(struct dm_md_mempools *pools);
 
 /*

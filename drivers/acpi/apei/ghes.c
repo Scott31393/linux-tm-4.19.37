@@ -114,7 +114,19 @@ static DEFINE_MUTEX(ghes_list_mutex);
  * from BIOS to Linux can be determined only in NMI, IRQ or timer
  * handler, but general ioremap can not be used in atomic context, so
  * the fixmap is used instead.
- *
+ */
+
+/*
+ * Two virtual pages are used, one for IRQ/PROCESS context, the other for
+ * NMI context (optionally).
+ */
+#define GHES_IOREMAP_PAGES           2
+#define GHES_IOREMAP_IRQ_PAGE(base)	(base)
+#define GHES_IOREMAP_NMI_PAGE(base)	((base) + PAGE_SIZE)
+
+/* virtual memory area for atomic ioremap */
+static struct vm_struct *ghes_ioremap_area;
+/*
  * These 2 spinlocks are used to prevent the fixmap entries from being used
  * simultaneously.
  */
@@ -128,6 +140,23 @@ static struct ghes_estatus_cache *ghes_estatus_caches[GHES_ESTATUS_CACHES_SIZE];
 static atomic_t ghes_estatus_cache_alloced;
 
 static int ghes_panic_timeout __read_mostly = 30;
+
+static int ghes_ioremap_init(void)
+{
+	ghes_ioremap_area = __get_vm_area(PAGE_SIZE * GHES_IOREMAP_PAGES,
+		VM_IOREMAP, VMALLOC_START, VMALLOC_END);
+	if (!ghes_ioremap_area) {
+		pr_err(GHES_PFX "Failed to allocate virtual memory area for atomic ioremap.\n");
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void ghes_ioremap_exit(void)
+{
+	free_vm_area(ghes_ioremap_area);
+}
 
 static void __iomem *ghes_ioremap_pfn_nmi(u64 pfn)
 {
@@ -410,52 +439,7 @@ static void ghes_handle_memory_failure(struct acpi_hest_generic_data *gdata, int
 		flags = 0;
 
 	if (flags != -1)
-		memory_failure_queue(pfn, flags);
-#endif
-}
-
-/*
- * PCIe AER errors need to be sent to the AER driver for reporting and
- * recovery. The GHES severities map to the following AER severities and
- * require the following handling:
- *
- * GHES_SEV_CORRECTABLE -> AER_CORRECTABLE
- *     These need to be reported by the AER driver but no recovery is
- *     necessary.
- * GHES_SEV_RECOVERABLE -> AER_NONFATAL
- * GHES_SEV_RECOVERABLE && CPER_SEC_RESET -> AER_FATAL
- *     These both need to be reported and recovered from by the AER driver.
- * GHES_SEV_PANIC does not make it to this handling since the kernel must
- *     panic.
- */
-static void ghes_handle_aer(struct acpi_hest_generic_data *gdata)
-{
-#ifdef CONFIG_ACPI_APEI_PCIEAER
-	struct cper_sec_pcie *pcie_err = acpi_hest_get_payload(gdata);
-
-	if (pcie_err->validation_bits & CPER_PCIE_VALID_DEVICE_ID &&
-	    pcie_err->validation_bits & CPER_PCIE_VALID_AER_INFO) {
-		unsigned int devfn;
-		int aer_severity;
-
-		devfn = PCI_DEVFN(pcie_err->device_id.device,
-				  pcie_err->device_id.function);
-		aer_severity = cper_severity_to_aer(gdata->error_severity);
-
-		/*
-		 * If firmware reset the component to contain
-		 * the error, we must reinitialize it before
-		 * use, so treat it as a fatal AER error.
-		 */
-		if (gdata->flags & CPER_SEC_RESET)
-			aer_severity = AER_FATAL;
-
-		aer_recover_queue(pcie_err->device_id.segment,
-				  pcie_err->device_id.bus,
-				  devfn, aer_severity,
-				  (struct aer_capability_regs *)
-				  pcie_err->aer_info);
-	}
+		memory_failure_queue(pfn, 0, flags);
 #endif
 }
 
@@ -481,14 +465,43 @@ static void ghes_do_proc(struct ghes *ghes,
 		if (guid_equal(sec_type, &CPER_SEC_PLATFORM_MEM)) {
 			struct cper_sec_mem_err *mem_err = acpi_hest_get_payload(gdata);
 
-			ghes_edac_report_mem_error(sev, mem_err);
+			ghes_edac_report_mem_error(ghes, sev, mem_err);
 
 			arch_apei_report_mem_error(sev, mem_err);
 			ghes_handle_memory_failure(gdata, sev);
 		}
+#ifdef CONFIG_ACPI_APEI_PCIEAER
 		else if (guid_equal(sec_type, &CPER_SEC_PCIE)) {
-			ghes_handle_aer(gdata);
+			struct cper_sec_pcie *pcie_err = acpi_hest_get_payload(gdata);
+
+			if (sev == GHES_SEV_RECOVERABLE &&
+			    sec_sev == GHES_SEV_RECOVERABLE &&
+			    pcie_err->validation_bits & CPER_PCIE_VALID_DEVICE_ID &&
+			    pcie_err->validation_bits & CPER_PCIE_VALID_AER_INFO) {
+				unsigned int devfn;
+				int aer_severity;
+
+				devfn = PCI_DEVFN(pcie_err->device_id.device,
+						  pcie_err->device_id.function);
+				aer_severity = cper_severity_to_aer(gdata->error_severity);
+
+				/*
+				 * If firmware reset the component to contain
+				 * the error, we must reinitialize it before
+				 * use, so treat it as a fatal AER error.
+				 */
+				if (gdata->flags & CPER_SEC_RESET)
+					aer_severity = AER_FATAL;
+
+				aer_recover_queue(pcie_err->device_id.segment,
+						  pcie_err->device_id.bus,
+						  devfn, aer_severity,
+						  (struct aer_capability_regs *)
+						  pcie_err->aer_info);
+			}
+
 		}
+#endif
 		else if (guid_equal(sec_type, &CPER_SEC_PROC_ARM)) {
 			struct cper_sec_proc_arm *err = acpi_hest_get_payload(gdata);
 
@@ -691,8 +704,6 @@ static void __ghes_panic(struct ghes *ghes)
 {
 	__ghes_print_estatus(KERN_EMERG, ghes->generic, ghes->estatus);
 
-	ghes_clear_estatus(ghes);
-
 	/* reboot to log the error! */
 	if (!panic_timeout)
 		panic_timeout = ghes_panic_timeout;
@@ -748,9 +759,9 @@ static void ghes_add_timer(struct ghes *ghes)
 	add_timer(&ghes->timer);
 }
 
-static void ghes_poll_func(struct timer_list *t)
+static void ghes_poll_func(unsigned long data)
 {
-	struct ghes *ghes = from_timer(ghes, t, timer);
+	struct ghes *ghes = (void *)data;
 
 	ghes_proc(ghes);
 	if (!(ghes->flags & GHES_EXITING))
@@ -888,6 +899,7 @@ static void ghes_print_queued_estatus(void)
 	struct ghes_estatus_node *estatus_node;
 	struct acpi_hest_generic *generic;
 	struct acpi_hest_generic_status *estatus;
+	u32 len, node_len;
 
 	llnode = llist_del_all(&ghes_estatus_llist);
 	/*
@@ -899,6 +911,8 @@ static void ghes_print_queued_estatus(void)
 		estatus_node = llist_entry(llnode, struct ghes_estatus_node,
 					   llnode);
 		estatus = GHES_ESTATUS_FROM_NODE(estatus_node);
+		len = cper_estatus_len(estatus);
+		node_len = GHES_ESTATUS_NODE_LEN(len);
 		generic = estatus_node->generic;
 		ghes_print_estatus(NULL, generic, estatus);
 		llnode = llnode->next;
@@ -1089,9 +1103,14 @@ static int ghes_probe(struct platform_device *ghes_dev)
 		goto err;
 	}
 
+	rc = ghes_edac_register(ghes, &ghes_dev->dev);
+	if (rc < 0)
+		goto err;
+
 	switch (generic->notify.type) {
 	case ACPI_HEST_NOTIFY_POLLED:
-		timer_setup(&ghes->timer, ghes_poll_func, TIMER_DEFERRABLE);
+		setup_deferrable_timer(&ghes->timer, ghes_poll_func,
+				       (unsigned long)ghes);
 		ghes_add_timer(ghes);
 		break;
 	case ACPI_HEST_NOTIFY_EXTERNAL:
@@ -1100,14 +1119,14 @@ static int ghes_probe(struct platform_device *ghes_dev)
 		if (rc) {
 			pr_err(GHES_PFX "Failed to map GSI to IRQ for generic hardware error source: %d\n",
 			       generic->header.source_id);
-			goto err;
+			goto err_edac_unreg;
 		}
 		rc = request_irq(ghes->irq, ghes_irq_func, IRQF_SHARED,
 				 "GHES IRQ", ghes);
 		if (rc) {
 			pr_err(GHES_PFX "Failed to register IRQ for generic hardware error source: %d\n",
 			       generic->header.source_id);
-			goto err;
+			goto err_edac_unreg;
 		}
 		break;
 
@@ -1130,16 +1149,14 @@ static int ghes_probe(struct platform_device *ghes_dev)
 	default:
 		BUG();
 	}
-
 	platform_set_drvdata(ghes_dev, ghes);
-
-	ghes_edac_register(ghes, &ghes_dev->dev);
 
 	/* Handle any pending errors right away */
 	ghes_proc(ghes);
 
 	return 0;
-
+err_edac_unreg:
+	ghes_edac_unregister(ghes);
 err:
 	if (ghes) {
 		ghes_fini(ghes);
@@ -1230,9 +1247,13 @@ static int __init ghes_init(void)
 
 	ghes_nmi_init_cxt();
 
-	rc = ghes_estatus_pool_init();
+	rc = ghes_ioremap_init();
 	if (rc)
 		goto err;
+
+	rc = ghes_estatus_pool_init();
+	if (rc)
+		goto err_ioremap_exit;
 
 	rc = ghes_estatus_pool_expand(GHES_ESTATUS_CACHE_AVG_SIZE *
 				      GHES_ESTATUS_CACHE_ALLOCED_MAX);
@@ -1256,6 +1277,8 @@ static int __init ghes_init(void)
 	return 0;
 err_pool_exit:
 	ghes_estatus_pool_exit();
+err_ioremap_exit:
+	ghes_ioremap_exit();
 err:
 	return rc;
 }

@@ -336,6 +336,8 @@ static inline void outsl(unsigned long port, const void *buffer, int count)
 	}
 }
 
+#define flush_write_buffers() do { } while (0)
+
 #endif /* __KERNEL__ */
 
 #endif

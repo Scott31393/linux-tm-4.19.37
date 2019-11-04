@@ -7,6 +7,7 @@
  */
 
 #include <linux/types.h>
+#include <linux/module.h>
 #include <linux/atomic.h>
 #include <linux/inetdevice.h>
 #include <linux/ip.h>
@@ -23,13 +24,13 @@
 
 unsigned int
 nf_nat_masquerade_ipv4(struct sk_buff *skb, unsigned int hooknum,
-		       const struct nf_nat_range2 *range,
+		       const struct nf_nat_range *range,
 		       const struct net_device *out)
 {
 	struct nf_conn *ct;
 	struct nf_conn_nat *nat;
 	enum ip_conntrack_info ctinfo;
-	struct nf_nat_range2 newrange;
+	struct nf_nat_range newrange;
 	const struct rtable *rt;
 	__be32 newsrc, nh;
 
@@ -131,50 +132,31 @@ static struct notifier_block masq_inet_notifier = {
 	.notifier_call	= masq_inet_event,
 };
 
-static int masq_refcnt;
-static DEFINE_MUTEX(masq_mutex);
+static atomic_t masquerade_notifier_refcount = ATOMIC_INIT(0);
 
-int nf_nat_masquerade_ipv4_register_notifier(void)
+void nf_nat_masquerade_ipv4_register_notifier(void)
 {
-	int ret = 0;
-
-	mutex_lock(&masq_mutex);
 	/* check if the notifier was already set */
-	if (++masq_refcnt > 1)
-		goto out_unlock;
+	if (atomic_inc_return(&masquerade_notifier_refcount) > 1)
+		return;
 
 	/* Register for device down reports */
-	ret = register_netdevice_notifier(&masq_dev_notifier);
-	if (ret)
-		goto err_dec;
+	register_netdevice_notifier(&masq_dev_notifier);
 	/* Register IP address change reports */
-	ret = register_inetaddr_notifier(&masq_inet_notifier);
-	if (ret)
-		goto err_unregister;
-
-	mutex_unlock(&masq_mutex);
-	return ret;
-
-err_unregister:
-	unregister_netdevice_notifier(&masq_dev_notifier);
-err_dec:
-	masq_refcnt--;
-out_unlock:
-	mutex_unlock(&masq_mutex);
-	return ret;
+	register_inetaddr_notifier(&masq_inet_notifier);
 }
 EXPORT_SYMBOL_GPL(nf_nat_masquerade_ipv4_register_notifier);
 
 void nf_nat_masquerade_ipv4_unregister_notifier(void)
 {
-	mutex_lock(&masq_mutex);
 	/* check if the notifier still has clients */
-	if (--masq_refcnt > 0)
-		goto out_unlock;
+	if (atomic_dec_return(&masquerade_notifier_refcount) > 0)
+		return;
 
 	unregister_netdevice_notifier(&masq_dev_notifier);
 	unregister_inetaddr_notifier(&masq_inet_notifier);
-out_unlock:
-	mutex_unlock(&masq_mutex);
 }
 EXPORT_SYMBOL_GPL(nf_nat_masquerade_ipv4_unregister_notifier);
+
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Rusty Russell <rusty@rustcorp.com.au>");

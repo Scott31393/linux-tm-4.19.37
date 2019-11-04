@@ -175,33 +175,26 @@ static int line6_send_raw_message_async_part(struct message *msg,
 	}
 
 	msg->done += bytes;
-
-	/* sanity checks of EP before actually submitting */
-	retval = usb_urb_ep_type_check(urb);
-	if (retval < 0)
-		goto error;
-
 	retval = usb_submit_urb(urb, GFP_ATOMIC);
-	if (retval < 0)
-		goto error;
+
+	if (retval < 0) {
+		dev_err(line6->ifcdev, "%s: usb_submit_urb failed (%d)\n",
+			__func__, retval);
+		usb_free_urb(urb);
+		kfree(msg);
+		return retval;
+	}
 
 	return 0;
-
- error:
-	dev_err(line6->ifcdev, "%s: usb_submit_urb failed (%d)\n",
-		__func__, retval);
-	usb_free_urb(urb);
-	kfree(msg);
-	return retval;
 }
 
 /*
 	Setup and start timer.
 */
 void line6_start_timer(struct timer_list *timer, unsigned long msecs,
-		       void (*function)(struct timer_list *t))
+		       void (*function)(unsigned long), unsigned long data)
 {
-	timer->function = function;
+	setup_timer(timer, function, data);
 	mod_timer(timer, jiffies + msecs_to_jiffies(msecs));
 }
 EXPORT_SYMBOL_GPL(line6_start_timer);

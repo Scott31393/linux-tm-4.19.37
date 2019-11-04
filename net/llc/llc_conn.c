@@ -734,7 +734,6 @@ void llc_sap_add_socket(struct llc_sap *sap, struct sock *sk)
 	llc_sk(sk)->sap = sap;
 
 	spin_lock_bh(&sap->sk_lock);
-	sock_set_flag(sk, SOCK_RCU_FREE);
 	sap->sk_count++;
 	sk_nulls_add_node_rcu(sk, laddr_hb);
 	hlist_add_head(&llc->dev_hash_node, dev_hb);
@@ -917,16 +916,20 @@ static void llc_sk_init(struct sock *sk)
 	llc->inc_cntr = llc->dec_cntr = 2;
 	llc->dec_step = llc->connect_step = 1;
 
-	timer_setup(&llc->ack_timer.timer, llc_conn_ack_tmr_cb, 0);
+	setup_timer(&llc->ack_timer.timer, llc_conn_ack_tmr_cb,
+			(unsigned long)sk);
 	llc->ack_timer.expire	      = sysctl_llc2_ack_timeout;
 
-	timer_setup(&llc->pf_cycle_timer.timer, llc_conn_pf_cycle_tmr_cb, 0);
+	setup_timer(&llc->pf_cycle_timer.timer, llc_conn_pf_cycle_tmr_cb,
+			(unsigned long)sk);
 	llc->pf_cycle_timer.expire	   = sysctl_llc2_p_timeout;
 
-	timer_setup(&llc->rej_sent_timer.timer, llc_conn_rej_tmr_cb, 0);
+	setup_timer(&llc->rej_sent_timer.timer, llc_conn_rej_tmr_cb,
+			(unsigned long)sk);
 	llc->rej_sent_timer.expire	   = sysctl_llc2_rej_timeout;
 
-	timer_setup(&llc->busy_state_timer.timer, llc_conn_busy_tmr_cb, 0);
+	setup_timer(&llc->busy_state_timer.timer, llc_conn_busy_tmr_cb,
+			(unsigned long)sk);
 	llc->busy_state_timer.expire	     = sysctl_llc2_busy_timeout;
 
 	llc->n2 = 2;   /* max retransmit */

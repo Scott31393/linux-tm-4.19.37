@@ -14,6 +14,7 @@
 #define _NF_CONNTRACK_CORE_H
 
 #include <linux/netfilter.h>
+#include <net/netfilter/nf_conntrack_l3proto.h>
 #include <net/netfilter/nf_conntrack_l4proto.h>
 #include <net/netfilter/nf_conntrack_ecache.h>
 
@@ -39,8 +40,16 @@ void nf_conntrack_cleanup_start(void);
 void nf_conntrack_init_end(void);
 void nf_conntrack_cleanup_end(void);
 
+bool nf_ct_get_tuple(const struct sk_buff *skb, unsigned int nhoff,
+		     unsigned int dataoff, u_int16_t l3num, u_int8_t protonum,
+		     struct net *net,
+		     struct nf_conntrack_tuple *tuple,
+		     const struct nf_conntrack_l3proto *l3proto,
+		     const struct nf_conntrack_l4proto *l4proto);
+
 bool nf_ct_invert_tuple(struct nf_conntrack_tuple *inverse,
 			const struct nf_conntrack_tuple *orig,
+			const struct nf_conntrack_l3proto *l3proto,
 			const struct nf_conntrack_l4proto *l4proto);
 
 /* Find a connection corresponding to a tuple. */
@@ -66,8 +75,10 @@ static inline int nf_conntrack_confirm(struct sk_buff *skb)
 	return ret;
 }
 
-void print_tuple(struct seq_file *s, const struct nf_conntrack_tuple *tuple,
-		 const struct nf_conntrack_l4proto *proto);
+void
+print_tuple(struct seq_file *s, const struct nf_conntrack_tuple *tuple,
+            const struct nf_conntrack_l3proto *l3proto,
+            const struct nf_conntrack_l4proto *proto);
 
 #define CONNTRACK_LOCKS 1024
 

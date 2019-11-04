@@ -17,10 +17,8 @@
 #include <linux/arm-smccc.h>
 #include <linux/bug.h>
 #include <linux/io.h>
-#include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_device.h>
-#include <linux/platform_device.h>
 #include <linux/printk.h>
 #include <linux/types.h>
 #include <linux/sizes.h>
@@ -219,11 +217,21 @@ static const struct of_device_id meson_sm_ids[] = {
 	{ /* sentinel */ },
 };
 
-static int __init meson_sm_probe(struct platform_device *pdev)
+int __init meson_sm_init(void)
 {
 	const struct meson_sm_chip *chip;
+	const struct of_device_id *matched_np;
+	struct device_node *np;
 
-	chip = of_match_device(meson_sm_ids, &pdev->dev)->data;
+	np = of_find_matching_node_and_match(NULL, meson_sm_ids, &matched_np);
+	if (!np)
+		return -ENODEV;
+
+	chip = matched_np->data;
+	if (!chip) {
+		pr_err("unable to setup secure-monitor data\n");
+		goto out;
+	}
 
 	if (chip->cmd_shmem_in_base) {
 		fw.sm_shmem_in_base = meson_sm_map_shmem(chip->cmd_shmem_in_base,
@@ -249,11 +257,4 @@ out_in_base:
 out:
 	return -EINVAL;
 }
-
-static struct platform_driver meson_sm_driver = {
-	.driver = {
-		.name = "meson-sm",
-		.of_match_table = of_match_ptr(meson_sm_ids),
-	},
-};
-module_platform_driver_probe(meson_sm_driver, meson_sm_probe);
+device_initcall(meson_sm_init);

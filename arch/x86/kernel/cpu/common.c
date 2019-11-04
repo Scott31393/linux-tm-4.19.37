@@ -1,6 +1,3 @@
-/* cpu_feature_enabled() cannot be used this early */
-#define USE_EARLY_PGTABLE_L5
-
 #include <linux/bootmem.h>
 #include <linux/linkage.h>
 #include <linux/bitops.h>
@@ -68,13 +65,6 @@ cpumask_var_t cpu_callin_mask;
 
 /* representing cpus for which sibling maps can be computed */
 cpumask_var_t cpu_sibling_setup_mask;
-
-/* Number of siblings per CPU package */
-int smp_num_siblings = 1;
-EXPORT_SYMBOL(smp_num_siblings);
-
-/* Last level cache ID of each logical CPU */
-DEFINE_PER_CPU_READ_MOSTLY(u16, cpu_llc_id) = BAD_APICID;
 
 /* correctly size the local cpu masks */
 void __init setup_cpu_local_masks(void)
@@ -341,30 +331,6 @@ static __always_inline void setup_smap(struct cpuinfo_x86 *c)
 	}
 }
 
-static __always_inline void setup_umip(struct cpuinfo_x86 *c)
-{
-	/* Check the boot processor, plus build option for UMIP. */
-	if (!cpu_feature_enabled(X86_FEATURE_UMIP))
-		goto out;
-
-	/* Check the current processor's cpuid bits. */
-	if (!cpu_has(c, X86_FEATURE_UMIP))
-		goto out;
-
-	cr4_set_bits(X86_CR4_UMIP);
-
-	pr_info("x86/cpu: Activated the Intel User Mode Instruction Prevention (UMIP) CPU feature\n");
-
-	return;
-
-out:
-	/*
-	 * Make sure UMIP is disabled in case it was enabled in a
-	 * previous boot (e.g., via kexec).
-	 */
-	cr4_clear_bits(X86_CR4_UMIP);
-}
-
 /*
  * Protection Keys are not available in 32-bit mode.
  */
@@ -497,7 +463,7 @@ void load_percpu_segment(int cpu)
 	loadsegment(fs, __KERNEL_PERCPU);
 #else
 	__loadsegment_simple(gs, 0);
-	wrmsrl(MSR_GS_BASE, cpu_kernelmode_gs_base(cpu));
+	wrmsrl(MSR_GS_BASE, (unsigned long)per_cpu(irq_stack_union.gs_base, cpu));
 #endif
 	load_stack_canary_segment();
 }
@@ -587,19 +553,6 @@ static void get_model_name(struct cpuinfo_x86 *c)
 	*(s + 1) = '\0';
 }
 
-void detect_num_cpu_cores(struct cpuinfo_x86 *c)
-{
-	unsigned int eax, ebx, ecx, edx;
-
-	c->x86_max_cores = 1;
-	if (!IS_ENABLED(CONFIG_SMP) || c->cpuid_level < 4)
-		return;
-
-	cpuid_count(4, 0, &eax, &ebx, &ecx, &edx);
-	if (eax & 0x1f)
-		c->x86_max_cores = (eax >> 26) + 1;
-}
-
 void cpu_detect_cache_sizes(struct cpuinfo_x86 *c)
 {
 	unsigned int n, dummy, ebx, ecx, edx, l2size;
@@ -661,36 +614,33 @@ static void cpu_detect_tlb(struct cpuinfo_x86 *c)
 		tlb_lld_4m[ENTRIES], tlb_lld_1g[ENTRIES]);
 }
 
-int detect_ht_early(struct cpuinfo_x86 *c)
+void detect_ht(struct cpuinfo_x86 *c)
 {
 #ifdef CONFIG_SMP
 	u32 eax, ebx, ecx, edx;
+	int index_msb, core_bits;
+	static bool printed;
 
 	if (!cpu_has(c, X86_FEATURE_HT))
-		return -1;
+		return;
 
 	if (cpu_has(c, X86_FEATURE_CMP_LEGACY))
-		return -1;
+		goto out;
 
 	if (cpu_has(c, X86_FEATURE_XTOPOLOGY))
-		return -1;
+		return;
 
 	cpuid(1, &eax, &ebx, &ecx, &edx);
 
 	smp_num_siblings = (ebx & 0xff0000) >> 16;
-	if (smp_num_siblings == 1)
+
+	if (smp_num_siblings == 1) {
 		pr_info_once("CPU0: Hyper-Threading is disabled\n");
-#endif
-	return 0;
-}
+		goto out;
+	}
 
-void detect_ht(struct cpuinfo_x86 *c)
-{
-#ifdef CONFIG_SMP
-	int index_msb, core_bits;
-
-	if (detect_ht_early(c) < 0)
-		return;
+	if (smp_num_siblings <= 1)
+		goto out;
 
 	index_msb = get_count_order(smp_num_siblings);
 	c->phys_proc_id = apic->phys_pkg_id(c->initial_apicid, index_msb);
@@ -703,6 +653,15 @@ void detect_ht(struct cpuinfo_x86 *c)
 
 	c->cpu_core_id = apic->phys_pkg_id(c->initial_apicid, index_msb) &
 				       ((1 << core_bits) - 1);
+
+out:
+	if (!printed && (c->x86_max_cores * smp_num_siblings) > 1) {
+		pr_info("CPU: Physical Processor ID: %d\n",
+			c->phys_proc_id);
+		pr_info("CPU: Processor Core ID: %d\n",
+			c->cpu_core_id);
+		printed = 1;
+	}
 #endif
 }
 
@@ -800,12 +759,6 @@ static void init_speculation_control(struct cpuinfo_x86 *c)
 		set_cpu_cap(c, X86_FEATURE_STIBP);
 		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
 	}
-
-	if (cpu_has(c, X86_FEATURE_AMD_SSBD)) {
-		set_cpu_cap(c, X86_FEATURE_SSBD);
-		set_cpu_cap(c, X86_FEATURE_MSR_SPEC_CTRL);
-		clear_cpu_cap(c, X86_FEATURE_VIRT_SSBD);
-	}
 }
 
 void get_cpu_cap(struct cpuinfo_x86 *c)
@@ -888,8 +841,15 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 
 	if (c->extended_cpuid_level >= 0x80000008) {
 		cpuid(0x80000008, &eax, &ebx, &ecx, &edx);
+
+		c->x86_virt_bits = (eax >> 8) & 0xff;
+		c->x86_phys_bits = eax & 0xff;
 		c->x86_capability[CPUID_8000_0008_EBX] = ebx;
 	}
+#ifdef CONFIG_X86_32
+	else if (cpu_has(c, X86_FEATURE_PAE) || cpu_has(c, X86_FEATURE_PSE36))
+		c->x86_phys_bits = 36;
+#endif
 
 	if (c->extended_cpuid_level >= 0x8000000a)
 		c->x86_capability[CPUID_8000_000A_EDX] = cpuid_edx(0x8000000a);
@@ -903,23 +863,6 @@ void get_cpu_cap(struct cpuinfo_x86 *c)
 	 * several times during CPU initialization.
 	 */
 	apply_forced_caps(c);
-}
-
-void get_cpu_address_sizes(struct cpuinfo_x86 *c)
-{
-	u32 eax, ebx, ecx, edx;
-
-	if (c->extended_cpuid_level >= 0x80000008) {
-		cpuid(0x80000008, &eax, &ebx, &ecx, &edx);
-
-		c->x86_virt_bits = (eax >> 8) & 0xff;
-		c->x86_phys_bits = eax & 0xff;
-	}
-#ifdef CONFIG_X86_32
-	else if (cpu_has(c, X86_FEATURE_PAE) || cpu_has(c, X86_FEATURE_PSE36))
-		c->x86_phys_bits = 36;
-#endif
-	c->x86_cache_bits = c->x86_phys_bits;
 }
 
 static void identify_cpu_without_cpuid(struct cpuinfo_x86 *c)
@@ -966,8 +909,12 @@ static const __initconst struct x86_cpu_id cpu_no_meltdown[] = {
 	{}
 };
 
-/* Only list CPUs which speculate but are non susceptible to SSB */
 static const __initconst struct x86_cpu_id cpu_no_spec_store_bypass[] = {
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_PINEVIEW	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_LINCROFT	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_PENWELL		},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_CLOVERVIEW	},
+	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_CEDARVIEW	},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT1	},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_AIRMONT		},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT2	},
@@ -975,25 +922,14 @@ static const __initconst struct x86_cpu_id cpu_no_spec_store_bypass[] = {
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_CORE_YONAH		},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNL		},
 	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNM		},
+	{ X86_VENDOR_CENTAUR,	5,					},
+	{ X86_VENDOR_INTEL,	5,					},
+	{ X86_VENDOR_NSC,	5,					},
 	{ X86_VENDOR_AMD,	0x12,					},
 	{ X86_VENDOR_AMD,	0x11,					},
 	{ X86_VENDOR_AMD,	0x10,					},
 	{ X86_VENDOR_AMD,	0xf,					},
-	{}
-};
-
-static const __initconst struct x86_cpu_id cpu_no_l1tf[] = {
-	/* in addition to cpu_no_speculation */
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT1	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_SILVERMONT2	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_AIRMONT		},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_MERRIFIELD	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_MOOREFIELD	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_GOLDMONT	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_DENVERTON	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_ATOM_GEMINI_LAKE	},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNL		},
-	{ X86_VENDOR_INTEL,	6,	INTEL_FAM6_XEON_PHI_KNM		},
+	{ X86_VENDOR_ANY,	4,					},
 	{}
 };
 
@@ -1001,22 +937,18 @@ static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
 {
 	u64 ia32_cap = 0;
 
+	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
+		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
+
+	if (!x86_match_cpu(cpu_no_spec_store_bypass) &&
+	   !(ia32_cap & ARCH_CAP_SSB_NO))
+		setup_force_cpu_bug(X86_BUG_SPEC_STORE_BYPASS);
+
 	if (x86_match_cpu(cpu_no_speculation))
 		return;
 
 	setup_force_cpu_bug(X86_BUG_SPECTRE_V1);
 	setup_force_cpu_bug(X86_BUG_SPECTRE_V2);
-
-	if (cpu_has(c, X86_FEATURE_ARCH_CAPABILITIES))
-		rdmsrl(MSR_IA32_ARCH_CAPABILITIES, ia32_cap);
-
-	if (!x86_match_cpu(cpu_no_spec_store_bypass) &&
-	   !(ia32_cap & ARCH_CAP_SSB_NO) &&
-	   !cpu_has(c, X86_FEATURE_AMD_SSB_NO))
-		setup_force_cpu_bug(X86_BUG_SPEC_STORE_BYPASS);
-
-	if (ia32_cap & ARCH_CAP_IBRS_ALL)
-		setup_force_cpu_cap(X86_FEATURE_IBRS_ENHANCED);
 
 	if (x86_match_cpu(cpu_no_meltdown))
 		return;
@@ -1026,29 +958,6 @@ static void __init cpu_set_bug_bits(struct cpuinfo_x86 *c)
 		return;
 
 	setup_force_cpu_bug(X86_BUG_CPU_MELTDOWN);
-
-	if (x86_match_cpu(cpu_no_l1tf))
-		return;
-
-	setup_force_cpu_bug(X86_BUG_L1TF);
-}
-
-/*
- * The NOPL instruction is supposed to exist on all CPUs of family >= 6;
- * unfortunately, that's not true in practice because of early VIA
- * chips and (more importantly) broken virtualizers that are not easy
- * to detect. In the latter case it doesn't even *fail* reliably, so
- * probing for it doesn't even work. Disable it completely on 32-bit
- * unless we can find a reliable way to detect all the broken cases.
- * Enable it explicitly on 64-bit for non-constant inputs of cpu_has().
- */
-static void detect_nopl(void)
-{
-#ifdef CONFIG_X86_32
-	setup_clear_cpu_cap(X86_FEATURE_NOPL);
-#else
-	setup_force_cpu_cap(X86_FEATURE_NOPL);
-#endif
 }
 
 /*
@@ -1057,8 +966,8 @@ static void detect_nopl(void)
  * cache alignment.
  * The others are not touched to avoid unwanted side effects.
  *
- * WARNING: this function is only called on the boot CPU.  Don't add code
- * here that is supposed to run on all CPUs.
+ * WARNING: this function is only called on the BP.  Don't add code here
+ * that is supposed to run on all CPUs.
  */
 static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 {
@@ -1081,7 +990,6 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 		cpu_detect(c);
 		get_cpu_vendor(c);
 		get_cpu_cap(c);
-		get_cpu_address_sizes(c);
 		setup_force_cpu_cap(X86_FEATURE_CPUID);
 
 		if (this_cpu->c_early_init)
@@ -1110,23 +1018,6 @@ static void __init early_identify_cpu(struct cpuinfo_x86 *c)
 	 */
 	setup_clear_cpu_cap(X86_FEATURE_PCID);
 #endif
-
-	/*
-	 * Later in the boot process pgtable_l5_enabled() relies on
-	 * cpu_feature_enabled(X86_FEATURE_LA57). If 5-level paging is not
-	 * enabled by this point we need to clear the feature bit to avoid
-	 * false-positives at the later stage.
-	 *
-	 * pgtable_l5_enabled() can be false here for several reasons:
-	 *  - 5-level paging is disabled compile-time;
-	 *  - it's 32-bit kernel;
-	 *  - machine doesn't support 5-level paging;
-	 *  - user specified 'no5lvl' in kernel command line.
-	 */
-	if (!pgtable_l5_enabled())
-		setup_clear_cpu_cap(X86_FEATURE_LA57);
-
-	detect_nopl();
 }
 
 void __init early_cpu_init(void)
@@ -1160,6 +1051,24 @@ void __init early_cpu_init(void)
 #endif
 	}
 	early_identify_cpu(&boot_cpu_data);
+}
+
+/*
+ * The NOPL instruction is supposed to exist on all CPUs of family >= 6;
+ * unfortunately, that's not true in practice because of early VIA
+ * chips and (more importantly) broken virtualizers that are not easy
+ * to detect. In the latter case it doesn't even *fail* reliably, so
+ * probing for it doesn't even work. Disable it completely on 32-bit
+ * unless we can find a reliable way to detect all the broken cases.
+ * Enable it explicitly on 64-bit for non-constant inputs of cpu_has().
+ */
+static void detect_nopl(struct cpuinfo_x86 *c)
+{
+#ifdef CONFIG_X86_32
+	clear_cpu_cap(c, X86_FEATURE_NOPL);
+#else
+	set_cpu_cap(c, X86_FEATURE_NOPL);
+#endif
 }
 
 static void detect_null_seg_behavior(struct cpuinfo_x86 *c)
@@ -1208,8 +1117,6 @@ static void generic_identify(struct cpuinfo_x86 *c)
 
 	get_cpu_cap(c);
 
-	get_cpu_address_sizes(c);
-
 	if (c->cpuid_level >= 0x00000001) {
 		c->initial_apicid = (cpuid_ebx(1) >> 24) & 0xFF;
 #ifdef CONFIG_X86_32
@@ -1223,6 +1130,8 @@ static void generic_identify(struct cpuinfo_x86 *c)
 	}
 
 	get_model_name(c); /* Default name */
+
+	detect_nopl(c);
 
 	detect_null_seg_behavior(c);
 
@@ -1344,10 +1253,9 @@ static void identify_cpu(struct cpuinfo_x86 *c)
 	/* Disable the PN if appropriate */
 	squash_the_stupid_serial_number(c);
 
-	/* Set up SMEP/SMAP/UMIP */
+	/* Set up SMEP/SMAP */
 	setup_smep(c);
 	setup_smap(c);
-	setup_umip(c);
 
 	/*
 	 * The vendor-specific functions might have changed features.
@@ -1510,7 +1418,6 @@ __setup("clearcpuid=", setup_clearcpuid);
 #ifdef CONFIG_X86_64
 DEFINE_PER_CPU_FIRST(union irq_stack_union,
 		     irq_stack_union) __aligned(PAGE_SIZE) __visible;
-EXPORT_PER_CPU_SYMBOL_GPL(irq_stack_union);
 
 /*
  * The following percpu variables are hot.  Align current_task to
@@ -1620,7 +1527,7 @@ DEFINE_PER_CPU(unsigned long, cpu_current_top_of_stack) =
 	(unsigned long)&init_thread_union + THREAD_SIZE;
 EXPORT_PER_CPU_SYMBOL(cpu_current_top_of_stack);
 
-#ifdef CONFIG_STACKPROTECTOR
+#ifdef CONFIG_CC_STACKPROTECTOR
 DEFINE_PER_CPU_ALIGNED(struct stack_canary, stack_canary);
 #endif
 
@@ -1822,12 +1729,11 @@ void cpu_init(void)
 	enter_lazy_tlb(&init_mm, curr);
 
 	/*
-	 * Initialize the TSS.  sp0 points to the entry trampoline stack
-	 * regardless of what task is running.
+	 * Initialize the TSS.  Don't bother initializing sp0, as the initial
+	 * task never enters user mode.
 	 */
 	set_tss_desc(cpu, &get_cpu_entry_area(cpu)->tss.x86_tss);
 	load_TR_desc();
-	load_sp0((unsigned long)(cpu_entry_stack(cpu) + 1));
 
 	load_mm_ldt(&init_mm);
 

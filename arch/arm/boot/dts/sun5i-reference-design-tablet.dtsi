@@ -110,14 +110,6 @@
 
 #include "axp209.dtsi"
 
-&ac_power_supply {
-	status = "okay";
-};
-
-&battery_power_supply {
-	status = "okay";
-};
-
 &lradc {
 	vref-supply = <&reg_ldo2>;
 };
@@ -127,7 +119,8 @@
 	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin>;
 	vmmc-supply = <&reg_vcc3v0>;
 	bus-width = <4>;
-	cd-gpios = <&pio 6 0 GPIO_ACTIVE_LOW>; /* PG0 */
+	cd-gpios = <&pio 6 0 GPIO_ACTIVE_HIGH>; /* PG0 */
+	cd-inverted;
 	status = "okay";
 };
 

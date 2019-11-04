@@ -28,7 +28,6 @@ enum dm_queue_mode {
 	DM_TYPE_REQUEST_BASED	 = 2,
 	DM_TYPE_MQ_REQUEST_BASED = 3,
 	DM_TYPE_DAX_BIO_BASED	 = 4,
-	DM_TYPE_NVME_BIO_BASED	 = 5,
 };
 
 typedef enum { STATUSTYPE_INFO, STATUSTYPE_TABLE } status_type_t;
@@ -87,10 +86,10 @@ typedef void (*dm_resume_fn) (struct dm_target *ti);
 typedef void (*dm_status_fn) (struct dm_target *ti, status_type_t status_type,
 			      unsigned status_flags, char *result, unsigned maxlen);
 
-typedef int (*dm_message_fn) (struct dm_target *ti, unsigned argc, char **argv,
-			      char *result, unsigned maxlen);
+typedef int (*dm_message_fn) (struct dm_target *ti, unsigned argc, char **argv);
 
-typedef int (*dm_prepare_ioctl_fn) (struct dm_target *ti, struct block_device **bdev);
+typedef int (*dm_prepare_ioctl_fn) (struct dm_target *ti,
+			    struct block_device **bdev, fmode_t *mode);
 
 /*
  * These iteration functions are typically used to check (and combine)
@@ -133,7 +132,7 @@ typedef int (*dm_busy_fn) (struct dm_target *ti);
  */
 typedef long (*dm_dax_direct_access_fn) (struct dm_target *ti, pgoff_t pgoff,
 		long nr_pages, void **kaddr, pfn_t *pfn);
-typedef size_t (*dm_dax_copy_iter_fn)(struct dm_target *ti, pgoff_t pgoff,
+typedef size_t (*dm_dax_copy_from_iter_fn)(struct dm_target *ti, pgoff_t pgoff,
 		void *addr, size_t bytes, struct iov_iter *i);
 #define PAGE_SECTORS (PAGE_SIZE / 512)
 
@@ -184,8 +183,7 @@ struct target_type {
 	dm_iterate_devices_fn iterate_devices;
 	dm_io_hints_fn io_hints;
 	dm_dax_direct_access_fn direct_access;
-	dm_dax_copy_iter_fn dax_copy_from_iter;
-	dm_dax_copy_iter_fn dax_copy_to_iter;
+	dm_dax_copy_from_iter_fn dax_copy_from_iter;
 
 	/* For internal device-mapper use. */
 	struct list_head list;
@@ -221,6 +219,14 @@ struct target_type {
  */
 #define DM_TARGET_WILDCARD		0x00000008
 #define dm_target_is_wildcard(type)	((type)->features & DM_TARGET_WILDCARD)
+
+/*
+ * Some targets need to be sent the same WRITE bio severals times so
+ * that they can send copies of it to different devices.  This function
+ * examines any supplied bio and returns the number of copies of it the
+ * target requires.
+ */
+typedef unsigned (*dm_num_write_bios_fn) (struct dm_target *ti, struct bio *bio);
 
 /*
  * A target implements own bio data integrity.
@@ -268,12 +274,6 @@ struct dm_target {
 	unsigned num_discard_bios;
 
 	/*
-	 * The number of secure erase bios that will be submitted to the target.
-	 * The bio number can be accessed with dm_bio_get_target_bio_nr.
-	 */
-	unsigned num_secure_erase_bios;
-
-	/*
 	 * The number of WRITE SAME bios that will be submitted to the target.
 	 * The bio number can be accessed with dm_bio_get_target_bio_nr.
 	 */
@@ -290,6 +290,13 @@ struct dm_target {
 	 * target to use.
 	 */
 	unsigned per_io_data_size;
+
+	/*
+	 * If defined, this function is called to find out how many
+	 * duplicate bios should be sent to the target when writing
+	 * data.
+	 */
+	dm_num_write_bios_fn num_write_bios;
 
 	/* target specific data */
 	void *private;
@@ -322,9 +329,35 @@ struct dm_target_callbacks {
 	int (*congested_fn) (struct dm_target_callbacks *, int);
 };
 
-void *dm_per_bio_data(struct bio *bio, size_t data_size);
-struct bio *dm_bio_from_per_bio_data(void *data, size_t data_size);
-unsigned dm_bio_get_target_bio_nr(const struct bio *bio);
+/*
+ * For bio-based dm.
+ * One of these is allocated for each bio.
+ * This structure shouldn't be touched directly by target drivers.
+ * It is here so that we can inline dm_per_bio_data and
+ * dm_bio_from_per_bio_data
+ */
+struct dm_target_io {
+	struct dm_io *io;
+	struct dm_target *ti;
+	unsigned target_bio_nr;
+	unsigned *len_ptr;
+	struct bio clone;
+};
+
+static inline void *dm_per_bio_data(struct bio *bio, size_t data_size)
+{
+	return (char *)bio - offsetof(struct dm_target_io, clone) - data_size;
+}
+
+static inline struct bio *dm_bio_from_per_bio_data(void *data, size_t data_size)
+{
+	return (struct bio *)((char *)data + data_size + offsetof(struct dm_target_io, clone));
+}
+
+static inline unsigned dm_bio_get_target_bio_nr(const struct bio *bio)
+{
+	return container_of(bio, struct dm_target_io, clone)->target_bio_nr;
+}
 
 int dm_register_target(struct target_type *t);
 void dm_unregister_target(struct target_type *t);
@@ -398,6 +431,12 @@ void dm_set_mdptr(struct mapped_device *md, void *ptr);
 void *dm_get_mdptr(struct mapped_device *md);
 
 /*
+ * Export the device via the ioctl interface (uses mdptr).
+ */
+int dm_ioctl_export(struct mapped_device *md, const char *name,
+		    const char *uuid);
+
+/*
  * A device can still be used while suspended, but I/O is deferred.
  */
 int dm_suspend(struct mapped_device *md, unsigned suspend_flags);
@@ -425,6 +464,13 @@ void dm_remap_zone_report(struct dm_target *ti, struct bio *bio,
 union map_info *dm_get_rq_mapinfo(struct request *rq);
 
 struct queue_limits *dm_get_queue_limits(struct mapped_device *md);
+
+void dm_lock_md_type(struct mapped_device *md);
+void dm_unlock_md_type(struct mapped_device *md);
+void dm_set_md_type(struct mapped_device *md, unsigned type);
+unsigned dm_get_md_type(struct mapped_device *md);
+int dm_setup_md_queue(struct mapped_device *md, struct dm_table *t);
+unsigned dm_table_get_type(struct dm_table *t);
 
 /*
  * Geometry functions.
@@ -465,11 +511,6 @@ void dm_table_set_type(struct dm_table *t, enum dm_queue_mode type);
  * Finally call this to make the table ready for use.
  */
 int dm_table_complete(struct dm_table *t);
-
-/*
- * Destroy the table when finished.
- */
-void dm_table_destroy(struct dm_table *t);
 
 /*
  * Target may require that it is never sent I/O larger than len.
@@ -549,13 +590,14 @@ do {									\
 #define DMEMIT(x...) sz += ((sz >= maxlen) ? \
 			  0 : scnprintf(result + sz, maxlen - sz, x))
 
+#define SECTOR_SHIFT 9
+
 /*
  * Definitions of return values from target end_io function.
  */
 #define DM_ENDIO_DONE		0
 #define DM_ENDIO_INCOMPLETE	1
 #define DM_ENDIO_REQUEUE	2
-#define DM_ENDIO_DELAY_REQUEUE	3
 
 /*
  * Definitions of return values from target map function.
@@ -563,7 +605,7 @@ do {									\
 #define DM_MAPIO_SUBMITTED	0
 #define DM_MAPIO_REMAPPED	1
 #define DM_MAPIO_REQUEUE	DM_ENDIO_REQUEUE
-#define DM_MAPIO_DELAY_REQUEUE	DM_ENDIO_DELAY_REQUEUE
+#define DM_MAPIO_DELAY_REQUEUE	3
 #define DM_MAPIO_KILL		4
 
 #define dm_sector_div64(x, y)( \
@@ -601,7 +643,7 @@ do {									\
  */
 #define dm_target_offset(ti, sector) ((sector) - (ti)->begin)
 
-static inline sector_t to_sector(unsigned long long n)
+static inline sector_t to_sector(unsigned long n)
 {
 	return (n >> SECTOR_SHIFT);
 }

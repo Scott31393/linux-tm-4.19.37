@@ -161,14 +161,6 @@
 
 #define ARM_V7S_TCR_PD1			BIT(5)
 
-#ifdef CONFIG_ZONE_DMA32
-#define ARM_V7S_TABLE_GFP_DMA GFP_DMA32
-#define ARM_V7S_TABLE_SLAB_FLAGS SLAB_CACHE_DMA32
-#else
-#define ARM_V7S_TABLE_GFP_DMA GFP_DMA
-#define ARM_V7S_TABLE_SLAB_FLAGS SLAB_CACHE_DMA
-#endif
-
 typedef u32 arm_v7s_iopte;
 
 static bool selftest_running;
@@ -200,22 +192,14 @@ static void *__arm_v7s_alloc_table(int lvl, gfp_t gfp,
 {
 	struct io_pgtable_cfg *cfg = &data->iop.cfg;
 	struct device *dev = cfg->iommu_dev;
-	phys_addr_t phys;
 	dma_addr_t dma;
 	size_t size = ARM_V7S_TABLE_SIZE(lvl);
 	void *table = NULL;
 
 	if (lvl == 1)
-		table = (void *)__get_free_pages(
-			__GFP_ZERO | ARM_V7S_TABLE_GFP_DMA, get_order(size));
+		table = (void *)__get_dma_pages(__GFP_ZERO, get_order(size));
 	else if (lvl == 2)
-		table = kmem_cache_zalloc(data->l2_tables, gfp);
-	phys = virt_to_phys(table);
-	if (phys != (arm_v7s_iopte)phys) {
-		/* Doesn't fit in PTE */
-		dev_err(dev, "Page table does not fit in PTE: %pa", &phys);
-		goto out_free;
-	}
+		table = kmem_cache_zalloc(data->l2_tables, gfp | GFP_DMA);
 	if (table && !(cfg->quirks & IO_PGTABLE_QUIRK_NO_DMA)) {
 		dma = dma_map_single(dev, table, size, DMA_TO_DEVICE);
 		if (dma_mapping_error(dev, dma))
@@ -225,11 +209,10 @@ static void *__arm_v7s_alloc_table(int lvl, gfp_t gfp,
 		 * address directly, so if the DMA layer suggests otherwise by
 		 * translating or truncating them, that bodes very badly...
 		 */
-		if (dma != phys)
+		if (dma != virt_to_phys(table))
 			goto out_unmap;
 	}
-	if (lvl == 2)
-		kmemleak_ignore(table);
+	kmemleak_ignore(table);
 	return table;
 
 out_unmap:
@@ -374,8 +357,8 @@ static bool arm_v7s_pte_is_cont(arm_v7s_iopte pte, int lvl)
 	return false;
 }
 
-static size_t __arm_v7s_unmap(struct arm_v7s_io_pgtable *, unsigned long,
-			      size_t, int, arm_v7s_iopte *);
+static int __arm_v7s_unmap(struct arm_v7s_io_pgtable *, unsigned long,
+			   size_t, int, arm_v7s_iopte *);
 
 static int arm_v7s_init_pte(struct arm_v7s_io_pgtable *data,
 			    unsigned long iova, phys_addr_t paddr, int prot,
@@ -558,10 +541,9 @@ static arm_v7s_iopte arm_v7s_split_cont(struct arm_v7s_io_pgtable *data,
 	return pte;
 }
 
-static size_t arm_v7s_split_blk_unmap(struct arm_v7s_io_pgtable *data,
-				      unsigned long iova, size_t size,
-				      arm_v7s_iopte blk_pte,
-				      arm_v7s_iopte *ptep)
+static int arm_v7s_split_blk_unmap(struct arm_v7s_io_pgtable *data,
+				   unsigned long iova, size_t size,
+				   arm_v7s_iopte blk_pte, arm_v7s_iopte *ptep)
 {
 	struct io_pgtable_cfg *cfg = &data->iop.cfg;
 	arm_v7s_iopte pte, *tablep;
@@ -602,9 +584,9 @@ static size_t arm_v7s_split_blk_unmap(struct arm_v7s_io_pgtable *data,
 	return size;
 }
 
-static size_t __arm_v7s_unmap(struct arm_v7s_io_pgtable *data,
-			      unsigned long iova, size_t size, int lvl,
-			      arm_v7s_iopte *ptep)
+static int __arm_v7s_unmap(struct arm_v7s_io_pgtable *data,
+			    unsigned long iova, size_t size, int lvl,
+			    arm_v7s_iopte *ptep)
 {
 	arm_v7s_iopte pte[ARM_V7S_CONT_PAGES];
 	struct io_pgtable *iop = &data->iop;
@@ -674,15 +656,20 @@ static size_t __arm_v7s_unmap(struct arm_v7s_io_pgtable *data,
 	return __arm_v7s_unmap(data, iova, size, lvl + 1, ptep);
 }
 
-static size_t arm_v7s_unmap(struct io_pgtable_ops *ops, unsigned long iova,
-			    size_t size)
+static int arm_v7s_unmap(struct io_pgtable_ops *ops, unsigned long iova,
+			 size_t size)
 {
 	struct arm_v7s_io_pgtable *data = io_pgtable_ops_to_data(ops);
+	size_t unmapped;
 
 	if (WARN_ON(upper_32_bits(iova)))
 		return 0;
 
-	return __arm_v7s_unmap(data, iova, size, 1, data->pgd);
+	unmapped = __arm_v7s_unmap(data, iova, size, 1, data->pgd);
+	if (unmapped)
+		io_pgtable_tlb_sync(&data->iop);
+
+	return unmapped;
 }
 
 static phys_addr_t arm_v7s_iova_to_phys(struct io_pgtable_ops *ops,
@@ -740,7 +727,7 @@ static struct io_pgtable *arm_v7s_alloc_pgtable(struct io_pgtable_cfg *cfg,
 	data->l2_tables = kmem_cache_create("io-pgtable_armv7s_l2",
 					    ARM_V7S_TABLE_SIZE(2),
 					    ARM_V7S_TABLE_SIZE(2),
-					    ARM_V7S_TABLE_SLAB_FLAGS, NULL);
+					    SLAB_CACHE_DMA, NULL);
 	if (!data->l2_tables)
 		goto out_free_data;
 
@@ -915,7 +902,8 @@ static int __init arm_v7s_do_selftests(void)
 
 	/* Full unmap */
 	iova = 0;
-	for_each_set_bit(i, &cfg.pgsize_bitmap, BITS_PER_LONG) {
+	i = find_first_bit(&cfg.pgsize_bitmap, BITS_PER_LONG);
+	while (i != BITS_PER_LONG) {
 		size = 1UL << i;
 
 		if (ops->unmap(ops, iova, size) != size)
@@ -932,6 +920,8 @@ static int __init arm_v7s_do_selftests(void)
 			return __FAIL(ops);
 
 		iova += SZ_16M;
+		i++;
+		i = find_next_bit(&cfg.pgsize_bitmap, BITS_PER_LONG, i);
 	}
 
 	free_io_pgtable_ops(ops);

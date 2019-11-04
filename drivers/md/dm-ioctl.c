@@ -1344,8 +1344,7 @@ static int table_load(struct file *filp, struct dm_ioctl *param, size_t param_si
 			goto err_unlock_md_type;
 		}
 	} else if (!is_valid_type(dm_get_md_type(md), dm_table_get_type(t))) {
-		DMWARN("can't change device type (old=%u vs new=%u) after initial table load.",
-		       dm_get_md_type(md), dm_table_get_type(t));
+		DMWARN("can't change device type after initial table load.");
 		r = -EINVAL;
 		goto err_unlock_md_type;
 	}
@@ -1596,7 +1595,7 @@ static int target_message(struct file *filp, struct dm_ioctl *param, size_t para
 		DMWARN("Target message sector outside device.");
 		r = -EINVAL;
 	} else if (ti->type->message)
-		r = ti->type->message(ti, argc, argv, result, maxlen);
+		r = ti->type->message(ti, argc, argv);
 	else {
 		DMWARN("Target type does not support messages");
 		r = -EINVAL;
@@ -1720,7 +1719,8 @@ static void free_params(struct dm_ioctl *param, size_t param_size, int param_fla
 }
 
 static int copy_params(struct dm_ioctl __user *user, struct dm_ioctl *param_kernel,
-		       int ioctl_flags, struct dm_ioctl **param, int *param_flags)
+		       int ioctl_flags,
+		       struct dm_ioctl **param, int *param_flags)
 {
 	struct dm_ioctl *dmi;
 	int secure_data;
@@ -1761,13 +1761,18 @@ static int copy_params(struct dm_ioctl __user *user, struct dm_ioctl *param_kern
 
 	*param_flags |= DM_PARAMS_MALLOC;
 
-	/* Copy from param_kernel (which was already copied from user) */
-	memcpy(dmi, param_kernel, minimum_data_size);
-
-	if (copy_from_user(&dmi->data, (char __user *)user + minimum_data_size,
-			   param_kernel->data_size - minimum_data_size))
+	if (copy_from_user(dmi, user, param_kernel->data_size))
 		goto bad;
+
 data_copied:
+	/*
+	 * Abort if something changed the ioctl data while it was being copied.
+	 */
+	if (dmi->data_size != param_kernel->data_size) {
+		DMERR("rejecting ioctl: data size modified while processing parameters");
+		goto bad;
+	}
+
 	/* Wipe the user buffer so we do not return it to userspace */
 	if (secure_data && clear_user(user, param_kernel->data_size))
 		goto bad;
@@ -1924,15 +1929,15 @@ static int dm_release(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static __poll_t dm_poll(struct file *filp, poll_table *wait)
+static unsigned dm_poll(struct file *filp, poll_table *wait)
 {
 	struct dm_file *priv = filp->private_data;
-	__poll_t mask = 0;
+	unsigned mask = 0;
 
 	poll_wait(filp, &dm_global_eventq, wait);
 
 	if ((int)(atomic_read(&dm_global_event_nr) - priv->global_event_nr) > 0)
-		mask |= EPOLLIN;
+		mask |= POLLIN;
 
 	return mask;
 }
@@ -1987,6 +1992,45 @@ void dm_interface_exit(void)
 	dm_hash_exit();
 }
 
+
+/**
+ * dm_ioctl_export - Permanently export a mapped device via the ioctl interface
+ * @md: Pointer to mapped_device
+ * @name: Buffer (size DM_NAME_LEN) for name
+ * @uuid: Buffer (size DM_UUID_LEN) for uuid or NULL if not desired
+ */
+int dm_ioctl_export(struct mapped_device *md, const char *name,
+		    const char *uuid)
+{
+	int r = 0;
+	struct hash_cell *hc;
+
+	if (!md) {
+		r = -ENXIO;
+		goto out;
+	}
+
+	/* The name and uuid can only be set once. */
+	mutex_lock(&dm_hash_cells_mutex);
+	hc = dm_get_mdptr(md);
+	mutex_unlock(&dm_hash_cells_mutex);
+	if (hc) {
+		DMERR("%s: already exported", dm_device_name(md));
+		r = -ENXIO;
+		goto out;
+	}
+
+	r = dm_hash_insert(name, uuid, md);
+	if (r) {
+		DMERR("%s: could not bind to '%s'", dm_device_name(md), name);
+		goto out;
+	}
+
+	/* Let udev know we've changed. */
+	dm_kobject_uevent(md, KOBJ_CHANGE, dm_get_event_nr(md));
+out:
+	return r;
+}
 /**
  * dm_copy_name_and_uuid - Copy mapped device name & uuid into supplied buffers
  * @md: Pointer to mapped_device

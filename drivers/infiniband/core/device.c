@@ -103,8 +103,11 @@ static int ib_device_check_mandatory(struct ib_device *device)
 		IB_MANDATORY_FUNC(query_device),
 		IB_MANDATORY_FUNC(query_port),
 		IB_MANDATORY_FUNC(query_pkey),
+		IB_MANDATORY_FUNC(query_gid),
 		IB_MANDATORY_FUNC(alloc_pd),
 		IB_MANDATORY_FUNC(dealloc_pd),
+		IB_MANDATORY_FUNC(create_ah),
+		IB_MANDATORY_FUNC(destroy_ah),
 		IB_MANDATORY_FUNC(create_qp),
 		IB_MANDATORY_FUNC(modify_qp),
 		IB_MANDATORY_FUNC(destroy_qp),
@@ -260,8 +263,6 @@ struct ib_device *ib_alloc_device(size_t size)
 	if (!device)
 		return NULL;
 
-	rdma_restrack_init(&device->res);
-
 	device->dev.class = &ib_class;
 	device_initialize(&device->dev);
 
@@ -287,8 +288,7 @@ void ib_dealloc_device(struct ib_device *device)
 {
 	WARN_ON(device->reg_state != IB_DEV_UNREGISTERED &&
 		device->reg_state != IB_DEV_UNINITIALIZED);
-	rdma_restrack_clean(&device->res);
-	put_device(&device->dev);
+	kobject_put(&device->dev.kobj);
 }
 EXPORT_SYMBOL(ib_dealloc_device);
 
@@ -334,8 +334,8 @@ static int read_port_immutable(struct ib_device *device)
 	 * Therefore port_immutable is declared as a 1 based array with
 	 * potential empty slots at the beginning.
 	 */
-	device->port_immutable = kcalloc(end_port + 1,
-					 sizeof(*device->port_immutable),
+	device->port_immutable = kzalloc(sizeof(*device->port_immutable)
+					 * (end_port + 1),
 					 GFP_KERNEL);
 	if (!device->port_immutable)
 		return -ENOMEM;
@@ -850,7 +850,7 @@ int ib_query_port(struct ib_device *device,
 	if (rdma_port_get_link_layer(device, port_num) != IB_LINK_LAYER_INFINIBAND)
 		return 0;
 
-	err = device->query_gid(device, port_num, 0, &gid);
+	err = ib_query_gid(device, port_num, 0, &gid, NULL);
 	if (err)
 		return err;
 
@@ -858,6 +858,31 @@ int ib_query_port(struct ib_device *device,
 	return 0;
 }
 EXPORT_SYMBOL(ib_query_port);
+
+/**
+ * ib_query_gid - Get GID table entry
+ * @device:Device to query
+ * @port_num:Port number to query
+ * @index:GID table index to query
+ * @gid:Returned GID
+ * @attr: Returned GID attributes related to this GID index (only in RoCE).
+ *   NULL means ignore.
+ *
+ * ib_query_gid() fetches the specified GID table entry.
+ */
+int ib_query_gid(struct ib_device *device,
+		 u8 port_num, int index, union ib_gid *gid,
+		 struct ib_gid_attr *attr)
+{
+	if (rdma_cap_roce_gid_table(device, port_num))
+		return ib_get_cached_gid(device, port_num, index, gid, attr);
+
+	if (attr)
+		return -EINVAL;
+
+	return device->query_gid(device, port_num, index, gid);
+}
+EXPORT_SYMBOL(ib_query_gid);
 
 /**
  * ib_enum_roce_netdev - enumerate all RoCE ports
@@ -1018,25 +1043,36 @@ EXPORT_SYMBOL(ib_modify_port);
 
 /**
  * ib_find_gid - Returns the port number and GID table index where
- *   a specified GID value occurs. Its searches only for IB link layer.
+ *   a specified GID value occurs.
  * @device: The device to query.
  * @gid: The GID value to search for.
+ * @gid_type: Type of GID.
+ * @ndev: The ndev related to the GID to search for.
  * @port_num: The port number of the device where the GID value was found.
  * @index: The index into the GID table where the GID was found.  This
  *   parameter may be NULL.
  */
 int ib_find_gid(struct ib_device *device, union ib_gid *gid,
+		enum ib_gid_type gid_type, struct net_device *ndev,
 		u8 *port_num, u16 *index)
 {
 	union ib_gid tmp_gid;
 	int ret, port, i;
 
 	for (port = rdma_start_port(device); port <= rdma_end_port(device); ++port) {
-		if (!rdma_protocol_ib(device, port))
+		if (rdma_cap_roce_gid_table(device, port)) {
+			if (!ib_find_cached_gid_by_port(device, gid, gid_type, port,
+							ndev, index)) {
+				*port_num = port;
+				return 0;
+			}
+		}
+
+		if (gid_type != IB_GID_TYPE_IB)
 			continue;
 
 		for (i = 0; i < device->port_immutable[port].gid_tbl_len; ++i) {
-			ret = rdma_query_gid(device, port, i, &tmp_gid);
+			ret = ib_query_gid(device, port, i, &tmp_gid, NULL);
 			if (ret)
 				return ret;
 			if (!memcmp(&tmp_gid, gid, sizeof *gid)) {
@@ -1204,7 +1240,7 @@ static int __init ib_core_init(void)
 
 	nldev_init();
 	rdma_nl_register(RDMA_NL_LS, ibnl_ls_cb_table);
-	roce_gid_mgmt_init();
+	ib_cache_setup();
 
 	return 0;
 
@@ -1227,7 +1263,7 @@ err:
 
 static void __exit ib_core_cleanup(void)
 {
-	roce_gid_mgmt_cleanup();
+	ib_cache_cleanup();
 	nldev_exit();
 	rdma_nl_unregister(RDMA_NL_LS);
 	unregister_lsm_notifier(&ibdev_lsm_nb);

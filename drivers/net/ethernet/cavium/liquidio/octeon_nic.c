@@ -82,10 +82,9 @@ octeon_alloc_soft_command_resp(struct octeon_device    *oct,
 }
 
 int octnet_send_nic_data_pkt(struct octeon_device *oct,
-			     struct octnic_data_pkt *ndata,
-			     int xmit_more)
+			     struct octnic_data_pkt *ndata)
 {
-	int ring_doorbell = !xmit_more;
+	int ring_doorbell = 1;
 
 	return octeon_send_command(oct, ndata->q_no, ring_doorbell, &ndata->cmd,
 				   ndata->buf, ndata->datasize,

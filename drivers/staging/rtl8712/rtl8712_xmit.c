@@ -573,8 +573,7 @@ static void update_txdesc(struct xmit_frame *pxmitframe, uint *pmem, int sz)
 		}
 	} else if (pxmitframe->frame_tag == MGNT_FRAMETAG) {
 		/* offset 4 */
-		/* CAM_ID(MAC_ID), default=5; */
-		ptxdesc->txdw1 |= cpu_to_le32((0x05) & 0x1f);
+		ptxdesc->txdw1 |= cpu_to_le32((0x05) & 0x1f);/*CAM_ID(MAC_ID), default=5;*/
 		qsel = (uint)(pattrib->qsel & 0x0000001f);
 		ptxdesc->txdw1 |= cpu_to_le32((qsel << QSEL_SHT) & 0x00001f00);
 		ptxdesc->txdw1 |= cpu_to_le32(BIT(16));/* Non-QoS */

@@ -12,7 +12,6 @@
 
 #include <linux/clockchips.h>
 #include <linux/interrupt.h>
-#include <linux/irq.h>
 #include <linux/i8253.h>
 #include <linux/time.h>
 #include <linux/export.h>
@@ -25,7 +24,7 @@
 #include <asm/time.h>
 
 #ifdef CONFIG_X86_64
-__visible volatile unsigned long jiffies __cacheline_aligned_in_smp = INITIAL_JIFFIES;
+__visible volatile unsigned long jiffies __cacheline_aligned = INITIAL_JIFFIES;
 #endif
 
 unsigned long profile_pc(struct pt_regs *regs)
@@ -70,12 +69,9 @@ static struct irqaction irq0  = {
 
 static void __init setup_default_timer_irq(void)
 {
-	/*
-	 * Unconditionally register the legacy timer; even without legacy
-	 * PIC/PIT we need this for the HPET0 in legacy replacement mode.
-	 */
-	if (setup_irq(0, &irq0))
-		pr_info("Failed to register legacy timer interrupt\n");
+	if (!nr_legacy_irqs())
+		return;
+	setup_irq(0, &irq0);
 }
 
 /* Default timer init function */
@@ -89,11 +85,6 @@ void __init hpet_time_init(void)
 static __init void x86_late_time_init(void)
 {
 	x86_init.timers.timer_init();
-	/*
-	 * After PIT/HPET timers init, select and setup
-	 * the final interrupt mode for delivering IRQs.
-	 */
-	x86_init.irqs.intr_mode_init();
 	tsc_init();
 }
 

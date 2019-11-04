@@ -408,10 +408,10 @@ int jffs2_do_remount_fs(struct super_block *sb, int *flags, char *data)
 		mutex_unlock(&c->alloc_sem);
 	}
 
-	if (!(*flags & SB_RDONLY))
+	if (!(*flags & MS_RDONLY))
 		jffs2_start_garbage_collect_thread(c);
 
-	*flags |= SB_NOATIME;
+	*flags |= MS_NOATIME;
 	return 0;
 }
 

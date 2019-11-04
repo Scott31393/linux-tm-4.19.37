@@ -344,8 +344,7 @@ static void choke_free(void *addr)
 	kvfree(addr);
 }
 
-static int choke_change(struct Qdisc *sch, struct nlattr *opt,
-			struct netlink_ext_ack *extack)
+static int choke_change(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct choke_sched_data *q = qdisc_priv(sch);
 	struct nlattr *tb[TCA_CHOKE_MAX + 1];
@@ -432,10 +431,9 @@ static int choke_change(struct Qdisc *sch, struct nlattr *opt,
 	return 0;
 }
 
-static int choke_init(struct Qdisc *sch, struct nlattr *opt,
-		      struct netlink_ext_ack *extack)
+static int choke_init(struct Qdisc *sch, struct nlattr *opt)
 {
-	return choke_change(sch, opt, extack);
+	return choke_change(sch, opt);
 }
 
 static int choke_dump(struct Qdisc *sch, struct sk_buff *skb)

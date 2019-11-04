@@ -82,7 +82,6 @@ sesInfoAlloc(void)
 		INIT_LIST_HEAD(&ret_buf->smb_ses_list);
 		INIT_LIST_HEAD(&ret_buf->tcon_list);
 		mutex_init(&ret_buf->session_mutex);
-		spin_lock_init(&ret_buf->iface_lock);
 	}
 	return ret_buf;
 }
@@ -103,7 +102,6 @@ sesInfoFree(struct cifs_ses *buf_to_free)
 	kfree(buf_to_free->user_name);
 	kfree(buf_to_free->domainName);
 	kzfree(buf_to_free->auth_key.response);
-	kfree(buf_to_free->iface_list);
 	kzfree(buf_to_free);
 }
 
@@ -119,10 +117,9 @@ tconInfoAlloc(void)
 		INIT_LIST_HEAD(&ret_buf->openFileList);
 		INIT_LIST_HEAD(&ret_buf->tcon_list);
 		spin_lock_init(&ret_buf->open_file_lock);
-		mutex_init(&ret_buf->crfid.fid_mutex);
-		ret_buf->crfid.fid = kzalloc(sizeof(struct cifs_fid),
-					     GFP_KERNEL);
+#ifdef CONFIG_CIFS_STATS
 		spin_lock_init(&ret_buf->stat_lock);
+#endif
 	}
 	return ret_buf;
 }
@@ -137,7 +134,6 @@ tconInfoFree(struct cifs_tcon *buf_to_free)
 	atomic_dec(&tconInfoAllocCount);
 	kfree(buf_to_free->nativeFileSystem);
 	kzfree(buf_to_free->password);
-	kfree(buf_to_free->crfid.fid);
 	kfree(buf_to_free);
 }
 
@@ -149,7 +145,7 @@ cifs_buf_get(void)
 	 * SMB2 header is bigger than CIFS one - no problems to clean some
 	 * more bytes for CIFS.
 	 */
-	size_t buf_size = sizeof(struct smb2_sync_hdr);
+	size_t buf_size = sizeof(struct smb2_hdr);
 
 	/*
 	 * We could use negotiated size instead of max_msgsize -
@@ -343,7 +339,7 @@ checkSMB(char *buf, unsigned int total_read, struct TCP_Server_Info *server)
 	/* otherwise, there is enough to get to the BCC */
 	if (check_smb_hdr(smb))
 		return -EIO;
-	clc_len = smbCalcSize(smb, server);
+	clc_len = smbCalcSize(smb);
 
 	if (4 + rfclen != total_read) {
 		cifs_dbg(VFS, "Length read does not match RFC1001 length %d\n",
@@ -402,17 +398,9 @@ is_valid_oplock_break(char *buffer, struct TCP_Server_Info *srv)
 			(struct smb_com_transaction_change_notify_rsp *)buf;
 		struct file_notify_information *pnotify;
 		__u32 data_offset = 0;
-		size_t len = srv->total_read - sizeof(pSMBr->hdr.smb_buf_length);
-
 		if (get_bcc(buf) > sizeof(struct file_notify_information)) {
 			data_offset = le32_to_cpu(pSMBr->DataOffset);
 
-			if (data_offset >
-			    len - sizeof(struct file_notify_information)) {
-				cifs_dbg(FYI, "invalid data_offset %u\n",
-					 data_offset);
-				return true;
-			}
 			pnotify = (struct file_notify_information *)
 				((char *)&pSMBr->hdr.Protocol + data_offset);
 			cifs_dbg(FYI, "dnotify on %s Action: 0x%x\n",
@@ -490,7 +478,8 @@ is_valid_oplock_break(char *buffer, struct TCP_Server_Info *srv)
 					   CIFS_INODE_DOWNGRADE_OPLOCK_TO_L2,
 					   &pCifsInode->flags);
 
-				cifs_queue_oplock_break(netfile);
+				queue_work(cifsoplockd_wq,
+					   &netfile->oplock_break);
 				netfile->oplock_break_cancelled = false;
 
 				spin_unlock(&tcon->open_file_lock);
@@ -585,28 +574,6 @@ void cifs_put_writer(struct cifsInodeInfo *cinode)
 		wake_up_bit(&cinode->flags, CIFS_INODE_PENDING_WRITERS);
 	}
 	spin_unlock(&cinode->writers_lock);
-}
-
-/**
- * cifs_queue_oplock_break - queue the oplock break handler for cfile
- *
- * This function is called from the demultiplex thread when it
- * receives an oplock break for @cfile.
- *
- * Assumes the tcon->open_file_lock is held.
- * Assumes cfile->file_info_lock is NOT held.
- */
-void cifs_queue_oplock_break(struct cifsFileInfo *cfile)
-{
-	/*
-	 * Bump the handle refcount now while we hold the
-	 * open_file_lock to enforce the validity of it for the oplock
-	 * break handler. The matching put is done at the end of the
-	 * handler.
-	 */
-	cifsFileInfo_get(cfile);
-
-	queue_work(cifsoplockd_wq, &cfile->oplock_break);
 }
 
 void cifs_done_oplock_break(struct cifsInodeInfo *cinode)
@@ -819,7 +786,7 @@ setup_aio_ctx_iter(struct cifs_aio_ctx *ctx, struct iov_iter *iter, int rw)
 				   GFP_KERNEL);
 
 	if (!bv) {
-		bv = vmalloc(array_size(max_pages, sizeof(struct bio_vec)));
+		bv = vmalloc(max_pages * sizeof(struct bio_vec));
 		if (!bv)
 			return -ENOMEM;
 	}
@@ -829,7 +796,7 @@ setup_aio_ctx_iter(struct cifs_aio_ctx *ctx, struct iov_iter *iter, int rw)
 				      GFP_KERNEL);
 
 	if (!pages) {
-		pages = vmalloc(array_size(max_pages, sizeof(struct page *)));
+		pages = vmalloc(max_pages * sizeof(struct page *));
 		if (!pages) {
 			kvfree(bv);
 			return -ENOMEM;
@@ -934,21 +901,4 @@ cifs_free_hash(struct crypto_shash **shash, struct sdesc **sdesc)
 	if (*shash)
 		crypto_free_shash(*shash);
 	*shash = NULL;
-}
-
-/**
- * rqst_page_get_length - obtain the length and offset for a page in smb_rqst
- * Input: rqst - a smb_rqst, page - a page index for rqst
- * Output: *len - the length for this page, *offset - the offset for this page
- */
-void rqst_page_get_length(struct smb_rqst *rqst, unsigned int page,
-				unsigned int *len, unsigned int *offset)
-{
-	*len = rqst->rq_pagesz;
-	*offset = (page == 0) ? rqst->rq_offset : 0;
-
-	if (rqst->rq_npages == 1 || page == rqst->rq_npages-1)
-		*len = rqst->rq_tailsz;
-	else if (page == 0)
-		*len = rqst->rq_pagesz - rqst->rq_offset;
 }

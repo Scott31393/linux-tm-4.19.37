@@ -1,7 +1,15 @@
-/* SPDX-License-Identifier: GPL-2.0 */
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2012 Realtek Corporation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
  *
  ******************************************************************************/
 /*-------------------------------------------------------------------------------
@@ -169,8 +177,7 @@ struct registry_priv
 	u8 bt_ampdu;
 	s8	ant_num;
 
-	/* false:Reject AP's Add BA req, true:accept AP's Add BA req */
-	bool	accept_addba_req;
+	bool	bAcceptAddbaReq;
 
 	u8 antdiv_cfg;
 	u8 antdiv_type;
@@ -684,9 +691,9 @@ int rtw_suspend_wow(struct adapter *padapter);
 int rtw_resume_process_wow(struct adapter *padapter);
 #endif
 
-static inline u8 *myid(struct eeprom_priv *peepriv)
+__inline static u8 *myid(struct eeprom_priv *peepriv)
 {
-	return peepriv->mac_addr;
+	return (peepriv->mac_addr);
 }
 
 /*  HCI Related header file */

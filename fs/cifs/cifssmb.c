@@ -43,7 +43,6 @@
 #include "cifs_unicode.h"
 #include "cifs_debug.h"
 #include "fscache.h"
-#include "smbdirect.h"
 
 #ifdef CONFIG_CIFS_POSIX
 static struct {
@@ -106,12 +105,6 @@ cifs_mark_open_files_invalid(struct cifs_tcon *tcon)
 		open_file->oplock_break_cancelled = true;
 	}
 	spin_unlock(&tcon->open_file_lock);
-
-	mutex_lock(&tcon->crfid.fid_mutex);
-	tcon->crfid.is_valid = false;
-	memset(tcon->crfid.fid, 0, sizeof(struct cifs_fid));
-	mutex_unlock(&tcon->crfid.fid_mutex);
-
 	/*
 	 * BB Add call to invalidate_inodes(sb) for all superblocks mounted
 	 * to this tcon.
@@ -218,10 +211,8 @@ cifs_reconnect_tcon(struct cifs_tcon *tcon, int smb_command)
 	mutex_unlock(&ses->session_mutex);
 	cifs_dbg(FYI, "reconnect tcon rc = %d\n", rc);
 
-	if (rc) {
-		printk_once(KERN_WARNING "reconnect tcon failed rc = %d\n", rc);
+	if (rc)
 		goto out;
-	}
 
 	atomic_inc(&tconInfoReconnectCount);
 
@@ -467,9 +458,6 @@ cifs_enable_signing(struct TCP_Server_Info *server, bool mnt_sign_required)
 		server->sign = true;
 	}
 
-	if (cifs_rdma_enabled(server) && server->sign)
-		cifs_dbg(VFS, "Signing is enabled, and RDMA read/write will be disabled");
-
 	return 0;
 }
 
@@ -508,13 +496,13 @@ decode_lanman_negprot_rsp(struct TCP_Server_Info *server, NEGOTIATE_RSP *pSMBr)
 		 * this requirement.
 		 */
 		int val, seconds, remain, result;
-		struct timespec64 ts;
-		time64_t utc = ktime_get_real_seconds();
+		struct timespec ts;
+		unsigned long utc = ktime_get_real_seconds();
 		ts = cnvrtDosUnixTm(rsp->SrvTime.Date,
 				    rsp->SrvTime.Time, 0);
-		cifs_dbg(FYI, "SrvTime %lld sec since 1970 (utc: %lld) diff: %lld\n",
-			 ts.tv_sec, utc,
-			 utc - ts.tv_sec);
+		cifs_dbg(FYI, "SrvTime %d sec since 1970 (utc: %d) diff: %d\n",
+			 (int)ts.tv_sec, (int)utc,
+			 (int)(utc - ts.tv_sec));
 		val = (int)(utc - ts.tv_sec);
 		seconds = abs(val);
 		result = (seconds / MIN_TZ_ADJ) * MIN_TZ_ADJ;
@@ -601,15 +589,10 @@ CIFSSMBNegotiate(const unsigned int xid, struct cifs_ses *ses)
 	}
 
 	count = 0;
-	/*
-	 * We know that all the name entries in the protocols array
-	 * are short (< 16 bytes anyway) and are NUL terminated.
-	 */
 	for (i = 0; i < CIFS_NUM_PROT; i++) {
-		size_t len = strlen(protocols[i].name) + 1;
-
-		memcpy(pSMB->DialectsArray+count, protocols[i].name, len);
-		count += len;
+		strncpy(pSMB->DialectsArray+count, protocols[i].name, 16);
+		count += strlen(protocols[i].name) + 1;
+		/* null at end of source and target buffers anyway */
 	}
 	inc_rfc1001_len(pSMB, count);
 	pSMB->ByteCount = cpu_to_le16(count);
@@ -1438,9 +1421,8 @@ openRetry:
 int
 cifs_discard_remaining_data(struct TCP_Server_Info *server)
 {
-	unsigned int rfclen = server->pdu_size;
-	int remaining = rfclen + server->vals->header_preamble_size -
-		server->total_read;
+	unsigned int rfclen = get_rfc1002_length(server->smallbuf);
+	int remaining = rfclen + 4 - server->total_read;
 
 	while (remaining > 0) {
 		int length;
@@ -1458,24 +1440,16 @@ cifs_discard_remaining_data(struct TCP_Server_Info *server)
 }
 
 static int
-__cifs_readv_discard(struct TCP_Server_Info *server, struct mid_q_entry *mid,
-		     bool malformed)
+cifs_readv_discard(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 {
 	int length;
+	struct cifs_readdata *rdata = mid->callback_data;
 
 	length = cifs_discard_remaining_data(server);
-	dequeue_mid(mid, malformed);
+	dequeue_mid(mid, rdata->result);
 	mid->resp_buf = server->smallbuf;
 	server->smallbuf = NULL;
 	return length;
-}
-
-static int
-cifs_readv_discard(struct TCP_Server_Info *server, struct mid_q_entry *mid)
-{
-	struct cifs_readdata *rdata = mid->callback_data;
-
-	return  __cifs_readv_discard(server, mid, rdata->result);
 }
 
 int
@@ -1485,9 +1459,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 	unsigned int data_offset, data_len;
 	struct cifs_readdata *rdata = mid->callback_data;
 	char *buf = server->smallbuf;
-	unsigned int buflen = server->pdu_size +
-		server->vals->header_preamble_size;
-	bool use_rdma_mr = false;
+	unsigned int buflen = get_rfc1002_length(buf) + 4;
 
 	cifs_dbg(FYI, "%s: mid=%llu offset=%llu bytes=%u\n",
 		 __func__, mid->mid, rdata->offset, rdata->bytes);
@@ -1519,23 +1491,12 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 		return -1;
 	}
 
-	/* set up first two iov for signature check and to get credits */
-	rdata->iov[0].iov_base = buf;
-	rdata->iov[0].iov_len = 4;
-	rdata->iov[1].iov_base = buf + 4;
-	rdata->iov[1].iov_len = server->total_read - 4;
-	cifs_dbg(FYI, "0: iov_base=%p iov_len=%zu\n",
-		 rdata->iov[0].iov_base, rdata->iov[0].iov_len);
-	cifs_dbg(FYI, "1: iov_base=%p iov_len=%zu\n",
-		 rdata->iov[1].iov_base, rdata->iov[1].iov_len);
-
 	/* Was the SMB read successful? */
 	rdata->result = server->ops->map_error(buf, false);
 	if (rdata->result != 0) {
 		cifs_dbg(FYI, "%s: server returned error %d\n",
 			 __func__, rdata->result);
-		/* normal error on read response */
-		return __cifs_readv_discard(server, mid, false);
+		return cifs_readv_discard(server, mid);
 	}
 
 	/* Is there enough to get to the rest of the READ_RSP header? */
@@ -1547,8 +1508,7 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 		return cifs_readv_discard(server, mid);
 	}
 
-	data_offset = server->ops->read_data_offset(buf) +
-		server->vals->header_preamble_size;
+	data_offset = server->ops->read_data_offset(buf) + 4;
 	if (data_offset < server->total_read) {
 		/*
 		 * win2k8 sometimes sends an offset of 0 when the read
@@ -1579,12 +1539,17 @@ cifs_readv_receive(struct TCP_Server_Info *server, struct mid_q_entry *mid)
 		server->total_read += length;
 	}
 
+	/* set up first iov for signature check */
+	rdata->iov[0].iov_base = buf;
+	rdata->iov[0].iov_len = 4;
+	rdata->iov[1].iov_base = buf + 4;
+	rdata->iov[1].iov_len = server->total_read - 4;
+	cifs_dbg(FYI, "0: iov_base=%p iov_len=%u\n",
+		 rdata->iov[0].iov_base, server->total_read);
+
 	/* how much data is in the response? */
-#ifdef CONFIG_CIFS_SMB_DIRECT
-	use_rdma_mr = rdata->mr;
-#endif
-	data_len = server->ops->read_data_length(buf, use_rdma_mr);
-	if (!use_rdma_mr && (data_offset + data_len > buflen)) {
+	data_len = server->ops->read_data_length(buf);
+	if (data_offset + data_len > buflen) {
 		/* data_len is corrupt -- discard frame */
 		rdata->result = -EIO;
 		return cifs_readv_discard(server, mid);
@@ -1964,17 +1929,10 @@ cifs_writedata_release(struct kref *refcount)
 {
 	struct cifs_writedata *wdata = container_of(refcount,
 					struct cifs_writedata, refcount);
-#ifdef CONFIG_CIFS_SMB_DIRECT
-	if (wdata->mr) {
-		smbd_deregister_mr(wdata->mr);
-		wdata->mr = NULL;
-	}
-#endif
 
 	if (wdata->cfile)
 		cifsFileInfo_put(wdata->cfile);
 
-	kvfree(wdata->pages);
 	kfree(wdata);
 }
 
@@ -2098,22 +2056,12 @@ cifs_writev_complete(struct work_struct *work)
 struct cifs_writedata *
 cifs_writedata_alloc(unsigned int nr_pages, work_func_t complete)
 {
-	struct page **pages =
-		kcalloc(nr_pages, sizeof(struct page *), GFP_NOFS);
-	if (pages)
-		return cifs_writedata_direct_alloc(pages, complete);
-
-	return NULL;
-}
-
-struct cifs_writedata *
-cifs_writedata_direct_alloc(struct page **pages, work_func_t complete)
-{
 	struct cifs_writedata *wdata;
 
-	wdata = kzalloc(sizeof(*wdata), GFP_NOFS);
+	/* writedata + number of page pointers */
+	wdata = kzalloc(sizeof(*wdata) +
+			sizeof(struct page *) * nr_pages, GFP_NOFS);
 	if (wdata != NULL) {
-		wdata->pages = pages;
 		kref_init(&wdata->refcount);
 		INIT_LIST_HEAD(&wdata->list);
 		init_completion(&wdata->done);
@@ -4098,7 +4046,7 @@ QInfRetry:
 	if (rc) {
 		cifs_dbg(FYI, "Send error in QueryInfo = %d\n", rc);
 	} else if (data) {
-		struct timespec64 ts;
+		struct timespec ts;
 		__u32 time = le32_to_cpu(pSMBr->last_write_time);
 
 		/* decode response */
@@ -4880,11 +4828,10 @@ CIFSGetDFSRefer(const unsigned int xid, struct cifs_ses *ses,
 	*target_nodes = NULL;
 
 	cifs_dbg(FYI, "In GetDFSRefer the path %s\n", search_name);
-	if (ses == NULL || ses->tcon_ipc == NULL)
+	if (ses == NULL)
 		return -ENODEV;
-
 getDFSRetry:
-	rc = smb_init(SMB_COM_TRANSACTION2, 15, ses->tcon_ipc, (void **) &pSMB,
+	rc = smb_init(SMB_COM_TRANSACTION2, 15, NULL, (void **) &pSMB,
 		      (void **) &pSMBr);
 	if (rc)
 		return rc;
@@ -4892,7 +4839,7 @@ getDFSRetry:
 	/* server pointer checked in called function,
 	but should never be null here anyway */
 	pSMB->hdr.Mid = get_next_mid(ses->server);
-	pSMB->hdr.Tid = ses->tcon_ipc->tid;
+	pSMB->hdr.Tid = ses->ipc_tid;
 	pSMB->hdr.Uid = ses->Suid;
 	if (ses->capabilities & CAP_STATUS32)
 		pSMB->hdr.Flags2 |= SMBFLG2_ERR_STATUS;

@@ -21,7 +21,6 @@
 #include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/platform_device.h>
-#include <linux/highmem.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/blkdev.h>
@@ -964,9 +963,10 @@ static bool filter(struct dma_chan *chan, void *param)
 	return true;
 }
 
-static void mxcmci_watchdog(struct timer_list *t)
+static void mxcmci_watchdog(unsigned long data)
 {
-	struct mxcmci_host *host = from_timer(host, t, watchdog);
+	struct mmc_host *mmc = (struct mmc_host *)data;
+	struct mxcmci_host *host = mmc_priv(mmc);
 	struct mmc_request *req = host->req;
 	unsigned int stat = mxcmci_readl(host, MMC_REG_STATUS);
 
@@ -1075,7 +1075,7 @@ static int mxcmci_probe(struct platform_device *pdev)
 		dat3_card_detect = true;
 
 	ret = mmc_regulator_get_supply(mmc);
-	if (ret)
+	if (ret == -EPROBE_DEFER)
 		goto out_free;
 
 	if (!mmc->ocr_avail) {
@@ -1165,7 +1165,9 @@ static int mxcmci_probe(struct platform_device *pdev)
 			goto out_free_dma;
 	}
 
-	timer_setup(&host->watchdog, mxcmci_watchdog, 0);
+	init_timer(&host->watchdog);
+	host->watchdog.function = &mxcmci_watchdog;
+	host->watchdog.data = (unsigned long)mmc;
 
 	mmc_add_host(mmc);
 
@@ -1207,8 +1209,7 @@ static int mxcmci_remove(struct platform_device *pdev)
 	return 0;
 }
 
-#ifdef CONFIG_PM_SLEEP
-static int mxcmci_suspend(struct device *dev)
+static int __maybe_unused mxcmci_suspend(struct device *dev)
 {
 	struct mmc_host *mmc = dev_get_drvdata(dev);
 	struct mxcmci_host *host = mmc_priv(mmc);
@@ -1218,7 +1219,7 @@ static int mxcmci_suspend(struct device *dev)
 	return 0;
 }
 
-static int mxcmci_resume(struct device *dev)
+static int __maybe_unused mxcmci_resume(struct device *dev)
 {
 	struct mmc_host *mmc = dev_get_drvdata(dev);
 	struct mxcmci_host *host = mmc_priv(mmc);
@@ -1234,7 +1235,6 @@ static int mxcmci_resume(struct device *dev)
 
 	return ret;
 }
-#endif
 
 static SIMPLE_DEV_PM_OPS(mxcmci_pm_ops, mxcmci_suspend, mxcmci_resume);
 

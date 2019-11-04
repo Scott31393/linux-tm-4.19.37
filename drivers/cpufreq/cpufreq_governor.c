@@ -276,7 +276,7 @@ static void dbs_update_util_handler(struct update_util_data *data, u64 time,
 	struct policy_dbs_info *policy_dbs = cdbs->policy_dbs;
 	u64 delta_ns, lst;
 
-	if (!cpufreq_this_cpu_can_update(policy_dbs->policy))
+	if (!cpufreq_can_do_remote_dvfs(policy_dbs->policy))
 		return;
 
 	/*
@@ -555,20 +555,12 @@ EXPORT_SYMBOL_GPL(cpufreq_dbs_governor_stop);
 
 void cpufreq_dbs_governor_limits(struct cpufreq_policy *policy)
 {
-	struct policy_dbs_info *policy_dbs;
-
-	/* Protect gov->gdbs_data against cpufreq_dbs_governor_exit() */
-	mutex_lock(&gov_dbs_data_mutex);
-	policy_dbs = policy->governor_data;
-	if (!policy_dbs)
-		goto out;
+	struct policy_dbs_info *policy_dbs = policy->governor_data;
 
 	mutex_lock(&policy_dbs->update_mutex);
 	cpufreq_policy_apply_limits(policy);
 	gov_update_sample_delay(policy_dbs, 0);
-	mutex_unlock(&policy_dbs->update_mutex);
 
-out:
-	mutex_unlock(&gov_dbs_data_mutex);
+	mutex_unlock(&policy_dbs->update_mutex);
 }
 EXPORT_SYMBOL_GPL(cpufreq_dbs_governor_limits);

@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Marvell Berlin SoC pinctrl core driver
  *
  * Copyright (C) 2014 Marvell Technology Group Ltd.
  *
  * Antoine Ténart <antoine.tenart@free-electrons.com>
+ *
+ * This file is licensed under the terms of the GNU General Public
+ * License version 2. This program is licensed "as is" without any
+ * warranty of any kind, whether express or implied.
  */
 
 #include <linux/io.h>
@@ -216,8 +219,9 @@ static int berlin_pinctrl_build_state(struct platform_device *pdev)
 	}
 
 	/* we will reallocate later */
-	pctrl->functions = kcalloc(max_functions,
-				   sizeof(*pctrl->functions), GFP_KERNEL);
+	pctrl->functions = devm_kzalloc(&pdev->dev,
+					max_functions * sizeof(*pctrl->functions),
+					GFP_KERNEL);
 	if (!pctrl->functions)
 		return -ENOMEM;
 
@@ -255,22 +259,17 @@ static int berlin_pinctrl_build_state(struct platform_device *pdev)
 				function++;
 			}
 
-			if (!found) {
-				kfree(pctrl->functions);
+			if (!found)
 				return -EINVAL;
-			}
 
 			if (!function->groups) {
 				function->groups =
-					devm_kcalloc(&pdev->dev,
-						     function->ngroups,
-						     sizeof(char *),
+					devm_kzalloc(&pdev->dev,
+						     function->ngroups * sizeof(char *),
 						     GFP_KERNEL);
 
-				if (!function->groups) {
-					kfree(pctrl->functions);
+				if (!function->groups)
 					return -ENOMEM;
-				}
 			}
 
 			groups = function->groups;

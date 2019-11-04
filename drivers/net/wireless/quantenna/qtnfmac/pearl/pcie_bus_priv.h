@@ -37,7 +37,6 @@ struct qtnf_pcie_bus_priv {
 	/* lock for tx0 operations */
 	spinlock_t tx0_lock;
 	u8 msi_enabled;
-	u8 tx_stopped;
 	int mps;
 
 	struct workqueue_struct *workqueue;

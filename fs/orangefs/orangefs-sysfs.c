@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Documentation/ABI/stable/sysfs-fs-orangefs:
+ * Documentation/ABI/stable/orangefs-sysfs:
  *
  * What:		/sys/fs/orangefs/perf_counter_reset
  * Date:		June 2015

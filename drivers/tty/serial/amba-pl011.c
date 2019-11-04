@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  *  Driver for AMBA serial ports
  *
@@ -7,6 +6,20 @@
  *  Copyright 1999 ARM Limited
  *  Copyright (C) 2000 Deep Blue Solutions Ltd.
  *  Copyright (C) 2010 ST-Ericsson SA
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  *
  * This is a generic driver for ARM AMBA-type serial ports.  They
  * have a lot of 16550-like features, but are not register compatible.
@@ -268,6 +281,7 @@ struct uart_amba_port {
 	unsigned int		old_status;
 	unsigned int		fifosize;	/* vendor-specific */
 	unsigned int		old_cr;		/* state during shutdown */
+	bool			autorts;
 	unsigned int		fixed_baud;	/* vendor-set fixed baud rate */
 	char			type[12];
 #ifdef CONFIG_DMA_ENGINE
@@ -314,9 +328,10 @@ static void pl011_write(unsigned int val, const struct uart_amba_port *uap,
 static int pl011_fifo_to_tty(struct uart_amba_port *uap)
 {
 	u16 status;
-	unsigned int ch, flag, fifotaken;
+	unsigned int ch, flag, max_count = 256;
+	int fifotaken = 0;
 
-	for (fifotaken = 0; fifotaken != 256; fifotaken++) {
+	while (max_count--) {
 		status = pl011_read(uap, REG_FR);
 		if (status & UART01x_FR_RXFE)
 			break;
@@ -325,6 +340,7 @@ static int pl011_fifo_to_tty(struct uart_amba_port *uap)
 		ch = pl011_read(uap, REG_DR) | UART_DUMMY_DR_RX;
 		flag = TTY_NORMAL;
 		uap->port.icount.rx++;
+		fifotaken++;
 
 		if (unlikely(ch & UART_DR_ERROR)) {
 			if (ch & UART011_DR_BE) {
@@ -1062,9 +1078,9 @@ static inline void pl011_dma_rx_stop(struct uart_amba_port *uap)
  * Every polling, It checks the residue in the dma buffer and transfer
  * data to the tty. Also, last_residue is updated for the next polling.
  */
-static void pl011_dma_rx_poll(struct timer_list *t)
+static void pl011_dma_rx_poll(unsigned long args)
 {
-	struct uart_amba_port *uap = from_timer(uap, t, dmarx.timer);
+	struct uart_amba_port *uap = (struct uart_amba_port *)args;
 	struct tty_port *port = &uap->port.state->port;
 	struct pl011_dmarx_data *dmarx = &uap->dmarx;
 	struct dma_chan *rxchan = uap->dmarx.chan;
@@ -1176,7 +1192,9 @@ skip_rx:
 			dev_dbg(uap->port.dev, "could not trigger initial "
 				"RX DMA job, fall back to interrupt mode\n");
 		if (uap->dmarx.poll_rate) {
-			timer_setup(&uap->dmarx.timer, pl011_dma_rx_poll, 0);
+			init_timer(&(uap->dmarx.timer));
+			uap->dmarx.timer.function = pl011_dma_rx_poll;
+			uap->dmarx.timer.data = (unsigned long)uap;
 			mod_timer(&uap->dmarx.timer,
 				jiffies +
 				msecs_to_jiffies(uap->dmarx.poll_rate));
@@ -1385,7 +1403,6 @@ static bool pl011_tx_char(struct uart_amba_port *uap, unsigned char c,
 		return false; /* unable to transmit character */
 
 	pl011_write(c, uap, REG_DR);
-	mb();
 	uap->port.icount.tx++;
 
 	return true;
@@ -1481,10 +1498,12 @@ static irqreturn_t pl011_int(int irq, void *dev_id)
 	struct uart_amba_port *uap = dev_id;
 	unsigned long flags;
 	unsigned int status, pass_counter = AMBA_ISR_PASS_LIMIT;
+	u16 imsc;
 	int handled = 0;
 
 	spin_lock_irqsave(&uap->port.lock, flags);
-	status = pl011_read(uap, REG_RIS) & uap->im;
+	imsc = pl011_read(uap, REG_IMSC);
+	status = pl011_read(uap, REG_RIS) & imsc;
 	if (status) {
 		do {
 			check_apply_cts_event_workaround(uap);
@@ -1508,7 +1527,7 @@ static irqreturn_t pl011_int(int irq, void *dev_id)
 			if (pass_counter-- == 0)
 				break;
 
-			status = pl011_read(uap, REG_RIS) & uap->im;
+			status = pl011_read(uap, REG_RIS) & imsc;
 		} while (status != 0);
 		handled = 1;
 	}
@@ -1569,7 +1588,7 @@ static void pl011_set_mctrl(struct uart_port *port, unsigned int mctrl)
 	TIOCMBIT(TIOCM_OUT2, UART011_CR_OUT2);
 	TIOCMBIT(TIOCM_LOOP, UART011_CR_LBE);
 
-	if (port->status & UPSTAT_AUTORTS) {
+	if (uap->autorts) {
 		/* We need to disable auto-RTS if we want to turn RTS off */
 		TIOCMBIT(TIOCM_RTS, UART011_CR_RTSEN);
 	}
@@ -1653,23 +1672,6 @@ static void pl011_put_poll_char(struct uart_port *port,
 
 #endif /* CONFIG_CONSOLE_POLL */
 
-unsigned long pl011_clk_round(unsigned long clk)
-{
-	unsigned long scaler;
-
-	/*
-	 * If increasing a clock by less than 0.1% changes it
-	 * from ..999.. to ..000.., round up.
-	 */
-	scaler = 1;
-	while (scaler * 100000 < clk)
-		scaler *= 10;
-	if ((clk + scaler - 1)/scaler % 1000 == 0)
-		clk = (clk/scaler + 1) * scaler;
-
-	return clk;
-}
-
 static int pl011_hwinit(struct uart_port *port)
 {
 	struct uart_amba_port *uap =
@@ -1686,7 +1688,7 @@ static int pl011_hwinit(struct uart_port *port)
 	if (retval)
 		return retval;
 
-	uap->port.uartclk = pl011_clk_round(clk_get_rate(uap->clk));
+	uap->port.uartclk = clk_get_rate(uap->clk);
 
 	/* Clear pending error and receive interrupts */
 	pl011_write(UART011_OEIS | UART011_BEIS | UART011_PEIS |
@@ -1856,7 +1858,7 @@ static void pl011_disable_uart(struct uart_amba_port *uap)
 {
 	unsigned int cr;
 
-	uap->port.status &= ~(UPSTAT_AUTOCTS | UPSTAT_AUTORTS);
+	uap->autorts = false;
 	spin_lock_irq(&uap->port.lock);
 	cr = pl011_read(uap, REG_CR);
 	uap->old_cr = cr;
@@ -2042,10 +2044,10 @@ pl011_set_termios(struct uart_port *port, struct ktermios *termios,
 			old_cr |= UART011_CR_RTSEN;
 
 		old_cr |= UART011_CR_CTSEN;
-		port->status |= UPSTAT_AUTOCTS | UPSTAT_AUTORTS;
+		uap->autorts = true;
 	} else {
 		old_cr &= ~(UART011_CR_CTSEN | UART011_CR_RTSEN);
-		port->status &= ~(UPSTAT_AUTOCTS | UPSTAT_AUTORTS);
+		uap->autorts = false;
 	}
 
 	if (uap->vendor->oversampling) {
@@ -2342,7 +2344,7 @@ static int __init pl011_console_setup(struct console *co, char *options)
 			plat->init();
 	}
 
-	uap->port.uartclk = pl011_clk_round(clk_get_rate(uap->clk));
+	uap->port.uartclk = clk_get_rate(uap->clk);
 
 	if (uap->vendor->fixed_options) {
 		baud = uap->fixed_baud;
@@ -2527,7 +2529,6 @@ static struct uart_driver amba_reg = {
 	.cons			= AMBA_CONSOLE,
 };
 
-#if 0
 static int pl011_probe_dt_alias(int index, struct device *dev)
 {
 	struct device_node *np;
@@ -2559,7 +2560,6 @@ static int pl011_probe_dt_alias(int index, struct device *dev)
 
 	return ret;
 }
-#endif
 
 /* unregisters the driver also if no more ports are left */
 static void pl011_unregister_port(struct uart_amba_port *uap)
@@ -2598,12 +2598,7 @@ static int pl011_setup_port(struct device *dev, struct uart_amba_port *uap,
 	if (IS_ERR(base))
 		return PTR_ERR(base);
 
-	/* Don't use DT serial<n> aliases - it causes the device to
-	   be renumbered to ttyAMA1 if it is the second serial port in the
-	   system, even though the other one is ttyS0. The 8250 driver
-	   doesn't use this logic, so always remains ttyS0.
 	index = pl011_probe_dt_alias(index, dev);
-	*/
 
 	uap->old_cr = 0;
 	uap->port.dev = dev;
@@ -2660,11 +2655,6 @@ static int pl011_probe(struct amba_device *dev, const struct amba_id *id)
 	uap->clk = devm_clk_get(&dev->dev, NULL);
 	if (IS_ERR(uap->clk))
 		return PTR_ERR(uap->clk);
-
-	if (of_property_read_bool(dev->dev.of_node, "cts-event-workaround")) {
-	    vendor->cts_event_workaround = true;
-	    dev_info(&dev->dev, "cts_event_workaround enabled\n");
-	}
 
 	uap->reg_offset = vendor->reg_offset;
 	uap->vendor = vendor;
@@ -2810,7 +2800,6 @@ static struct platform_driver arm_sbsa_uart_platform_driver = {
 		.name	= "sbsa-uart",
 		.of_match_table = of_match_ptr(sbsa_uart_of_match),
 		.acpi_match_table = ACPI_PTR(sbsa_uart_acpi_match),
-		.suppress_bind_attrs = IS_BUILTIN(CONFIG_SERIAL_AMBA_PL011),
 	},
 };
 
@@ -2839,7 +2828,6 @@ static struct amba_driver pl011_driver = {
 	.drv = {
 		.name	= "uart-pl011",
 		.pm	= &pl011_dev_pm_ops,
-		.suppress_bind_attrs = IS_BUILTIN(CONFIG_SERIAL_AMBA_PL011),
 	},
 	.id_table	= pl011_ids,
 	.probe		= pl011_probe,

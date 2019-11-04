@@ -15,7 +15,6 @@
 #include <linux/uaccess.h>
 #include <linux/kdebug.h>
 #include <linux/perf_event.h>
-#include <linux/mm_types.h>
 #include <asm/pgalloc.h>
 #include <asm/mmu.h>
 
@@ -67,12 +66,9 @@ void do_page_fault(unsigned long address, struct pt_regs *regs)
 	struct task_struct *tsk = current;
 	struct mm_struct *mm = tsk->mm;
 	siginfo_t info;
-	int ret;
-	vm_fault_t fault;
+	int fault, ret;
 	int write = regs->ecr_cause & ECR_C_PROTV_STORE;  /* ST/EX */
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
-
-	clear_siginfo(&info);
 
 	/*
 	 * We fault-in kernel-space virtual memory on-demand. The

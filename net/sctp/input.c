@@ -56,7 +56,6 @@
 #include <net/sctp/sm.h>
 #include <net/sctp/checksum.h>
 #include <net/net_namespace.h>
-#include <linux/rhashtable.h>
 
 /* Forward declarations for internal helpers. */
 static int sctp_rcv_ootb(struct sk_buff *);
@@ -107,7 +106,6 @@ int sctp_rcv(struct sk_buff *skb)
 	int family;
 	struct sctp_af *af;
 	struct net *net = dev_net(skb->dev);
-	bool is_gso = skb_is_gso(skb) && skb_is_gso_sctp(skb);
 
 	if (skb->pkt_type != PACKET_HOST)
 		goto discard_it;
@@ -125,7 +123,8 @@ int sctp_rcv(struct sk_buff *skb)
 	 * it's better to just linearize it otherwise crc computing
 	 * takes longer.
 	 */
-	if ((!is_gso && skb_linearize(skb)) ||
+	if ((!(skb_shinfo(skb)->gso_type & SKB_GSO_SCTP) &&
+	     skb_linearize(skb)) ||
 	    !pskb_may_pull(skb, sizeof(struct sctphdr)))
 		goto discard_it;
 
@@ -136,7 +135,7 @@ int sctp_rcv(struct sk_buff *skb)
 	if (skb_csum_unnecessary(skb))
 		__skb_decr_checksum_unnecessary(skb);
 	else if (!sctp_checksum_disable &&
-		 !is_gso &&
+		 !(skb_shinfo(skb)->gso_type & SKB_GSO_SCTP) &&
 		 sctp_rcv_checksum(net, skb) < 0)
 		goto discard_it;
 	skb->csum_valid = 1;
@@ -395,7 +394,6 @@ void sctp_icmp_frag_needed(struct sock *sk, struct sctp_association *asoc,
 		return;
 
 	if (sock_owned_by_user(sk)) {
-		atomic_set(&t->mtu_info, pmtu);
 		asoc->pmtu_pending = 1;
 		t->pmtu_pending = 1;
 		return;
@@ -1012,18 +1010,19 @@ struct sctp_association *sctp_lookup_association(struct net *net,
 }
 
 /* Is there an association matching the given local and peer addresses? */
-bool sctp_has_association(struct net *net,
-			  const union sctp_addr *laddr,
-			  const union sctp_addr *paddr)
+int sctp_has_association(struct net *net,
+			 const union sctp_addr *laddr,
+			 const union sctp_addr *paddr)
 {
+	struct sctp_association *asoc;
 	struct sctp_transport *transport;
 
-	if (sctp_lookup_association(net, laddr, paddr, &transport)) {
+	if ((asoc = sctp_lookup_association(net, laddr, paddr, &transport))) {
 		sctp_transport_put(transport);
-		return true;
+		return 1;
 	}
 
-	return false;
+	return 0;
 }
 
 /*
@@ -1219,7 +1218,7 @@ static struct sctp_association *__sctp_rcv_lookup_harder(struct net *net,
 	 * issue as packets hitting this are mostly INIT or INIT-ACK and
 	 * those cannot be on GSO-style anyway.
 	 */
-	if (skb_is_gso(skb) && skb_is_gso_sctp(skb))
+	if ((skb_shinfo(skb)->gso_type & SKB_GSO_SCTP) == SKB_GSO_SCTP)
 		return NULL;
 
 	ch = (struct sctp_chunkhdr *)skb->data;

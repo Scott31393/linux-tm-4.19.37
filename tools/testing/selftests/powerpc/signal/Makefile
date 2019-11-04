@@ -8,7 +8,6 @@ $(TEST_PROGS): ../harness.c ../utils.c signal.S
 CFLAGS += -maltivec
 signal_tm: CFLAGS += -mhtm
 
-top_srcdir = ../../../../..
 include ../../lib.mk
 
 clean:

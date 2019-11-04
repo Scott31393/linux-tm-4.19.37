@@ -15,7 +15,6 @@
 #include <linux/bcm47xx_nvram.h>
 #include <linux/phy.h>
 #include <linux/phy_fixed.h>
-#include <net/dsa.h>
 #include "bgmac.h"
 
 static bool bgmac_wait_value(struct bgmac *bgmac, u16 reg, u32 mask,
@@ -236,6 +235,7 @@ static void bgmac_dma_tx_free(struct bgmac *bgmac, struct bgmac_dma_ring *ring)
 {
 	struct device *dma_dev = bgmac->dma_dev;
 	int empty_slot;
+	bool freed = false;
 	unsigned bytes_compl = 0, pkts_compl = 0;
 
 	/* The last slot that hardware didn't consume yet */
@@ -278,6 +278,7 @@ static void bgmac_dma_tx_free(struct bgmac *bgmac, struct bgmac_dma_ring *ring)
 
 		slot->dma_addr = 0;
 		ring->start++;
+		freed = true;
 	}
 
 	if (!pkts_compl)
@@ -1189,7 +1190,7 @@ static int bgmac_open(struct net_device *net_dev)
 	bgmac_chip_init(bgmac);
 
 	err = request_irq(bgmac->irq, bgmac_interrupt, IRQF_SHARED,
-			  net_dev->name, net_dev);
+			  KBUILD_MODNAME, net_dev);
 	if (err < 0) {
 		dev_err(bgmac->dev, "IRQ request error: %d!\n", err);
 		bgmac_dma_cleanup(bgmac);
@@ -1490,8 +1491,6 @@ int bgmac_enet_probe(struct bgmac *bgmac)
 {
 	struct net_device *net_dev = bgmac->net_dev;
 	int err;
-
-	bgmac_chip_intrs_off(bgmac);
 
 	net_dev->irq = bgmac->irq;
 	SET_NETDEV_DEV(net_dev, bgmac->dev);

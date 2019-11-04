@@ -1,9 +1,26 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  *  of-thermal.c - Generic Thermal Management device tree support.
  *
  *  Copyright (C) 2013 Texas Instruments
  *  Copyright (C) 2013 Eduardo Valentin <eduardo.valentin@ti.com>
+ *
+ *
+ *  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *
+ *  This program is free software; you can redistribute it and/or modify
+ *  it under the terms of the GNU General Public License as published by
+ *  the Free Software Foundation; version 2 of the License.
+ *
+ *  This program is distributed in the hope that it will be useful, but
+ *  WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+ *  General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  59 Temple Place, Suite 330, Boston, MA 02111-1307 USA.
+ *
+ * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
  */
 #include <linux/thermal.h>
 #include <linux/slab.h>
@@ -13,6 +30,7 @@
 #include <linux/err.h>
 #include <linux/export.h>
 #include <linux/string.h>
+#include <linux/thermal.h>
 
 #include "thermal_core.h"
 
@@ -260,13 +278,10 @@ static int of_thermal_set_mode(struct thermal_zone_device *tz,
 
 	mutex_lock(&tz->lock);
 
-	if (mode == THERMAL_DEVICE_ENABLED) {
+	if (mode == THERMAL_DEVICE_ENABLED)
 		tz->polling_delay = data->polling_delay;
-		tz->passive_delay = data->passive_delay;
-	} else {
+	else
 		tz->polling_delay = 0;
-		tz->passive_delay = 0;
-	}
 
 	mutex_unlock(&tz->lock);
 
@@ -856,7 +871,7 @@ __init *thermal_of_build_thermal_zone(struct device_node *np)
 	if (tz->ntrips == 0) /* must have at least one child */
 		goto finish;
 
-	tz->trips = kcalloc(tz->ntrips, sizeof(*tz->trips), GFP_KERNEL);
+	tz->trips = kzalloc(tz->ntrips * sizeof(*tz->trips), GFP_KERNEL);
 	if (!tz->trips) {
 		ret = -ENOMEM;
 		goto free_tz;
@@ -882,7 +897,7 @@ __init *thermal_of_build_thermal_zone(struct device_node *np)
 	if (tz->num_tbps == 0)
 		goto finish;
 
-	tz->tbps = kcalloc(tz->num_tbps, sizeof(*tz->tbps), GFP_KERNEL);
+	tz->tbps = kzalloc(tz->num_tbps * sizeof(*tz->tbps), GFP_KERNEL);
 	if (!tz->tbps) {
 		ret = -ENOMEM;
 		goto free_trips;

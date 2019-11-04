@@ -48,7 +48,6 @@
 
 
 #include <linux/module.h>
-#include <linux/mod_devicetable.h>
 #include <linux/interrupt.h>
 #include <linux/kernel.h>
 #include <linux/spinlock.h>
@@ -537,10 +536,10 @@ static ssize_t goldfish_pipe_write(struct file *filp,
 			/* is_write */ 1);
 }
 
-static __poll_t goldfish_pipe_poll(struct file *filp, poll_table *wait)
+static unsigned int goldfish_pipe_poll(struct file *filp, poll_table *wait)
 {
 	struct goldfish_pipe *pipe = filp->private_data;
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 	int status;
 
 	poll_wait(filp, &pipe->wake_queue, wait);
@@ -550,13 +549,13 @@ static __poll_t goldfish_pipe_poll(struct file *filp, poll_table *wait)
 		return -ERESTARTSYS;
 
 	if (status & PIPE_POLL_IN)
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 	if (status & PIPE_POLL_OUT)
-		mask |= EPOLLOUT | EPOLLWRNORM;
+		mask |= POLLOUT | POLLWRNORM;
 	if (status & PIPE_POLL_HUP)
-		mask |= EPOLLHUP;
+		mask |= POLLHUP;
 	if (test_bit(BIT_CLOSED_ON_HOST, &pipe->flags))
-		mask |= EPOLLERR;
+		mask |= POLLERR;
 
 	return mask;
 }
@@ -646,7 +645,7 @@ static void goldfish_interrupt_task(unsigned long unused)
 		wake_up_interruptible(&pipe->wake_queue);
 	}
 }
-static DECLARE_TASKLET(goldfish_interrupt_tasklet, goldfish_interrupt_task, 0);
+DECLARE_TASKLET(goldfish_interrupt_tasklet, goldfish_interrupt_task, 0);
 
 /*
  * The general idea of the interrupt handling:

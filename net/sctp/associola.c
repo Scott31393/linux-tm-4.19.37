@@ -115,8 +115,8 @@ static struct sctp_association *sctp_association_init(
 	/* Initialize path max retrans value. */
 	asoc->pathmaxrxt = sp->pathmaxrxt;
 
-	asoc->flowlabel = sp->flowlabel;
-	asoc->dscp = sp->dscp;
+	/* Initialize default path MTU. */
+	asoc->pathmtu = sp->pathmtu;
 
 	/* Set association default SACK delay */
 	asoc->sackdelay = msecs_to_jiffies(sp->sackdelay);
@@ -149,7 +149,8 @@ static struct sctp_association *sctp_association_init(
 
 	/* Initializes the timers */
 	for (i = SCTP_EVENT_TIMEOUT_NONE; i < SCTP_NUM_TIMEOUT_TYPES; ++i)
-		timer_setup(&asoc->timers[i], sctp_timer_events[i], 0);
+		setup_timer(&asoc->timers[i], sctp_timer_events[i],
+				(unsigned long)asoc);
 
 	/* Pull default initialization values from the sock options.
 	 * Note: This assumes that the values have already been
@@ -248,10 +249,6 @@ static struct sctp_association *sctp_association_init(
 	if (sctp_stream_init(&asoc->stream, asoc->c.sinit_num_ostreams,
 			     0, gfp))
 		goto fail_init;
-
-	/* Initialize default path MTU. */
-	asoc->pathmtu = sp->pathmtu;
-	sctp_assoc_update_frag_point(asoc);
 
 	/* Assume that peer would support both address types unless we are
 	 * told otherwise.
@@ -435,7 +432,7 @@ static void sctp_association_destroy(struct sctp_association *asoc)
 
 	WARN_ON(atomic_read(&asoc->rmem_alloc));
 
-	kfree_rcu(asoc, rcu);
+	kfree(asoc);
 	SCTP_DBG_OBJCNT_DEC(assoc);
 }
 
@@ -500,9 +497,8 @@ void sctp_assoc_set_primary(struct sctp_association *asoc,
 void sctp_assoc_rm_peer(struct sctp_association *asoc,
 			struct sctp_transport *peer)
 {
-	struct sctp_transport *transport;
-	struct list_head *pos;
-	struct sctp_chunk *ch;
+	struct list_head	*pos;
+	struct sctp_transport	*transport;
 
 	pr_debug("%s: association:%p addr:%pISpc\n",
 		 __func__, asoc, &peer->ipaddr.sa);
@@ -566,6 +562,7 @@ void sctp_assoc_rm_peer(struct sctp_association *asoc,
 	 */
 	if (!list_empty(&peer->transmitted)) {
 		struct sctp_transport *active = asoc->peer.active_path;
+		struct sctp_chunk *ch;
 
 		/* Reset the transport of each chunk on this list */
 		list_for_each_entry(ch, &peer->transmitted,
@@ -586,10 +583,6 @@ void sctp_assoc_rm_peer(struct sctp_association *asoc,
 					jiffies + active->rto))
 				sctp_transport_hold(active);
 	}
-
-	list_for_each_entry(ch, &asoc->outqueue.out_chunk_list, list)
-		if (ch->transport == peer)
-			ch->transport = NULL;
 
 	asoc->peer.transport_count--;
 
@@ -655,36 +648,37 @@ struct sctp_transport *sctp_assoc_add_peer(struct sctp_association *asoc,
 	peer->sackdelay = asoc->sackdelay;
 	peer->sackfreq = asoc->sackfreq;
 
-	if (addr->sa.sa_family == AF_INET6) {
-		__be32 info = addr->v6.sin6_flowinfo;
-
-		if (info) {
-			peer->flowlabel = ntohl(info & IPV6_FLOWLABEL_MASK);
-			peer->flowlabel |= SCTP_FLOWLABEL_SET_MASK;
-		} else {
-			peer->flowlabel = asoc->flowlabel;
-		}
-	}
-	peer->dscp = asoc->dscp;
-
 	/* Enable/disable heartbeat, SACK delay, and path MTU discovery
 	 * based on association setting.
 	 */
 	peer->param_flags = asoc->param_flags;
 
-	/* Initialize the pmtu of the transport. */
 	sctp_transport_route(peer, NULL, sp);
+
+	/* Initialize the pmtu of the transport. */
+	if (peer->param_flags & SPP_PMTUD_DISABLE) {
+		if (asoc->pathmtu)
+			peer->pathmtu = asoc->pathmtu;
+		else
+			peer->pathmtu = SCTP_DEFAULT_MAXSEGMENT;
+	}
 
 	/* If this is the first transport addr on this association,
 	 * initialize the association PMTU to the peer's PMTU.
 	 * If not and the current association PMTU is higher than the new
 	 * peer's PMTU, reset the association PMTU to the new peer's PMTU.
 	 */
-	sctp_assoc_set_pmtu(asoc, asoc->pathmtu ?
-				  min_t(int, peer->pathmtu, asoc->pathmtu) :
-				  peer->pathmtu);
+	if (asoc->pathmtu)
+		asoc->pathmtu = min_t(int, peer->pathmtu, asoc->pathmtu);
+	else
+		asoc->pathmtu = peer->pathmtu;
+
+	pr_debug("%s: association:%p PMTU set to %d\n", __func__, asoc,
+		 asoc->pathmtu);
 
 	peer->pmtu_pending = 0;
+
+	asoc->frag_point = sctp_frag_point(asoc, asoc->pathmtu);
 
 	/* The asoc->peer.port might not be meaningful yet, but
 	 * initialize the packet structure anyway.
@@ -868,7 +862,7 @@ void sctp_assoc_control_transport(struct sctp_association *asoc,
 		event = sctp_ulpevent_make_peer_addr_change(asoc, &addr,
 					0, spc_state, error, GFP_ATOMIC);
 		if (event)
-			asoc->stream.si->enqueue_event(&asoc->ulpq, event);
+			sctp_ulpq_tail_event(&asoc->ulpq, event);
 	}
 
 	/* Select new active and retran paths. */
@@ -993,6 +987,31 @@ struct sctp_transport *sctp_assoc_lookup_tsn(struct sctp_association *asoc,
 	}
 out:
 	return match;
+}
+
+/* Is this the association we are looking for? */
+struct sctp_transport *sctp_assoc_is_match(struct sctp_association *asoc,
+					   struct net *net,
+					   const union sctp_addr *laddr,
+					   const union sctp_addr *paddr)
+{
+	struct sctp_transport *transport;
+
+	if ((htons(asoc->base.bind_addr.port) == laddr->v4.sin_port) &&
+	    (htons(asoc->peer.port) == paddr->v4.sin_port) &&
+	    net_eq(sock_net(asoc->base.sk), net)) {
+		transport = sctp_assoc_lookup_paddr(asoc, paddr);
+		if (!transport)
+			goto out;
+
+		if (sctp_bind_addr_match(&asoc->base.bind_addr, laddr,
+					 sctp_sk(asoc->base.sk)))
+			goto out;
+	}
+	transport = NULL;
+
+out:
+	return transport;
 }
 
 /* Do delayed input processing.  This is scheduled by sctp_rcv(). */
@@ -1416,31 +1435,6 @@ sctp_assoc_choose_alter_transport(struct sctp_association *asoc,
 	}
 }
 
-void sctp_assoc_update_frag_point(struct sctp_association *asoc)
-{
-	int frag = sctp_mtu_payload(sctp_sk(asoc->base.sk), asoc->pathmtu,
-				    sctp_datachk_len(&asoc->stream));
-
-	if (asoc->user_frag)
-		frag = min_t(int, frag, asoc->user_frag);
-
-	frag = min_t(int, frag, SCTP_MAX_CHUNK_LEN -
-				sctp_datachk_len(&asoc->stream));
-
-	asoc->frag_point = SCTP_TRUNC4(frag);
-}
-
-void sctp_assoc_set_pmtu(struct sctp_association *asoc, __u32 pmtu)
-{
-	if (asoc->pathmtu != pmtu) {
-		asoc->pathmtu = pmtu;
-		sctp_assoc_update_frag_point(asoc);
-	}
-
-	pr_debug("%s: asoc:%p, pmtu:%d, frag_point:%d\n", __func__, asoc,
-		 asoc->pathmtu, asoc->frag_point);
-}
-
 /* Update the association's pmtu and frag_point by going through all the
  * transports. This routine is called when a transport's PMTU has changed.
  */
@@ -1453,17 +1447,24 @@ void sctp_assoc_sync_pmtu(struct sctp_association *asoc)
 		return;
 
 	/* Get the lowest pmtu of all the transports. */
-	list_for_each_entry(t, &asoc->peer.transport_addr_list, transports) {
+	list_for_each_entry(t, &asoc->peer.transport_addr_list,
+				transports) {
 		if (t->pmtu_pending && t->dst) {
-			sctp_transport_update_pmtu(t,
-						   atomic_read(&t->mtu_info));
+			sctp_transport_update_pmtu(
+					t, SCTP_TRUNC4(dst_mtu(t->dst)));
 			t->pmtu_pending = 0;
 		}
 		if (!pmtu || (t->pathmtu < pmtu))
 			pmtu = t->pathmtu;
 	}
 
-	sctp_assoc_set_pmtu(asoc, pmtu);
+	if (pmtu) {
+		asoc->pathmtu = pmtu;
+		asoc->frag_point = sctp_frag_point(asoc, pmtu);
+	}
+
+	pr_debug("%s: asoc:%p, pmtu:%d, frag_point:%d\n", __func__, asoc,
+		 asoc->pathmtu, asoc->frag_point);
 }
 
 /* Should we send a SACK to update our peer? */

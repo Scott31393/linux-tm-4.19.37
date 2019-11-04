@@ -121,7 +121,6 @@ static int ad_sd_read_reg_raw(struct ad_sigma_delta *sigma_delta,
 	if (sigma_delta->info->has_registers) {
 		data[0] = reg << sigma_delta->info->addr_shift;
 		data[0] |= sigma_delta->info->read_mask;
-		data[0] |= sigma_delta->comm;
 		spi_message_add_tail(&t[0], &m);
 	}
 	spi_message_add_tail(&t[1], &m);
@@ -210,7 +209,6 @@ static int ad_sd_calibrate(struct ad_sigma_delta *sigma_delta,
 	unsigned int mode, unsigned int channel)
 {
 	int ret;
-	unsigned long timeout;
 
 	ret = ad_sigma_delta_set_channel(sigma_delta, channel);
 	if (ret)
@@ -226,8 +224,8 @@ static int ad_sd_calibrate(struct ad_sigma_delta *sigma_delta,
 
 	sigma_delta->irq_dis = false;
 	enable_irq(sigma_delta->spi->irq);
-	timeout = wait_for_completion_timeout(&sigma_delta->completion, 2 * HZ);
-	if (timeout == 0) {
+	ret = wait_for_completion_timeout(&sigma_delta->completion, 2*HZ);
+	if (ret == 0) {
 		sigma_delta->irq_dis = true;
 		disable_irq_nosync(sigma_delta->spi->irq);
 		ret = -EIO;
@@ -465,6 +463,7 @@ int ad_sd_validate_trigger(struct iio_dev *indio_dev, struct iio_trigger *trig)
 EXPORT_SYMBOL_GPL(ad_sd_validate_trigger);
 
 static const struct iio_trigger_ops ad_sd_trigger_ops = {
+	.owner = THIS_MODULE,
 };
 
 static int ad_sd_probe_trigger(struct iio_dev *indio_dev)

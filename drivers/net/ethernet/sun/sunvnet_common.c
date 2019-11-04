@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* sunvnet.c: Sun LDOM Virtual Network Driver.
  *
  * Copyright (C) 2007, 2008 David S. Miller <davem@davemloft.net>
@@ -1041,9 +1040,9 @@ static inline void vnet_free_skbs(struct sk_buff *skb)
 	}
 }
 
-void sunvnet_clean_timer_expire_common(struct timer_list *t)
+void sunvnet_clean_timer_expire_common(unsigned long port0)
 {
-	struct vnet_port *port = from_timer(port, t, clean_timer);
+	struct vnet_port *port = (struct vnet_port *)port0;
 	struct sk_buff *freeskbs;
 	unsigned pending;
 

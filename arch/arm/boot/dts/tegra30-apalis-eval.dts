@@ -79,7 +79,7 @@
 	 */
 	i2c@7000c000 {
 		status = "okay";
-		clock-frequency = <400000>;
+		clock-frequency = <100000>;
 
 		pcie-switch@58 {
 			compatible = "plx,pex8605";
@@ -88,7 +88,7 @@
 
 		/* M41T0M6 real time clock on carrier board */
 		rtc@68 {
-			compatible = "st,m41t0";
+			compatible = "st,m41t00";
 			reg = <0x68>;
 		};
 	};

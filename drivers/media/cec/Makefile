@@ -9,8 +9,4 @@ ifeq ($(CONFIG_CEC_PIN),y)
   cec-objs += cec-pin.o
 endif
 
-ifeq ($(CONFIG_CEC_PIN_ERROR_INJ),y)
-  cec-objs += cec-pin-error-inj.o
-endif
-
 obj-$(CONFIG_CEC_CORE) += cec.o

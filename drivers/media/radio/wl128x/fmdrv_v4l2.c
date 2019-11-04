@@ -102,7 +102,7 @@ static ssize_t fm_v4l2_fops_write(struct file *file, const char __user * buf,
 	return sizeof(rds);
 }
 
-static __poll_t fm_v4l2_fops_poll(struct file *file, struct poll_table_struct *pts)
+static u32 fm_v4l2_fops_poll(struct file *file, struct poll_table_struct *pts)
 {
 	int ret;
 	struct fmdev *fmdev;
@@ -112,7 +112,7 @@ static __poll_t fm_v4l2_fops_poll(struct file *file, struct poll_table_struct *p
 	ret = fmc_is_rds_data_available(fmdev, file, pts);
 	mutex_unlock(&fmdev->mutex);
 	if (ret < 0)
-		return EPOLLIN | EPOLLRDNORM;
+		return POLLIN | POLLRDNORM;
 
 	return 0;
 }

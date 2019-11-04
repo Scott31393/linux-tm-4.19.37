@@ -30,6 +30,8 @@
  * SOFTWARE.
  */
 
+#ifdef CONFIG_SECURITY_INFINIBAND
+
 #include <linux/security.h>
 #include <linux/completion.h>
 #include <linux/list.h>
@@ -651,11 +653,12 @@ int ib_security_modify_qp(struct ib_qp *qp,
 	}
 	return ret;
 }
+EXPORT_SYMBOL(ib_security_modify_qp);
 
-static int ib_security_pkey_access(struct ib_device *dev,
-				   u8 port_num,
-				   u16 pkey_index,
-				   void *sec)
+int ib_security_pkey_access(struct ib_device *dev,
+			    u8 port_num,
+			    u16 pkey_index,
+			    void *sec)
 {
 	u64 subnet_prefix;
 	u16 pkey;
@@ -675,6 +678,7 @@ static int ib_security_pkey_access(struct ib_device *dev,
 
 	return security_ib_pkey_access(sec, subnet_prefix, pkey);
 }
+EXPORT_SYMBOL(ib_security_pkey_access);
 
 static int ib_mad_agent_security_change(struct notifier_block *nb,
 					unsigned long event,
@@ -749,3 +753,5 @@ int ib_mad_enforce_security(struct ib_mad_agent_private *map, u16 pkey_index)
 				       pkey_index,
 				       map->agent.security);
 }
+
+#endif /* CONFIG_SECURITY_INFINIBAND */

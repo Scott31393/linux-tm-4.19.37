@@ -31,7 +31,6 @@
 #include <asm/mmu.h>
 #include <asm/mpspec.h>
 #include <asm/realmode.h>
-#include <asm/x86_init.h>
 
 #ifdef CONFIG_ACPI_APEI
 # include <asm/pgtable_types.h>
@@ -50,7 +49,7 @@ extern int acpi_fix_pin2_polarity;
 extern int acpi_disable_cmcff;
 
 extern u8 acpi_sci_flags;
-extern u32 acpi_sci_override_gsi;
+extern int acpi_sci_override_gsi;
 void acpi_pic_sci_set_trigger(unsigned int, u16);
 
 struct device;
@@ -134,14 +133,6 @@ static inline bool acpi_has_cpu_in_madt(void)
 	return !!acpi_lapic;
 }
 
-#define ACPI_HAVE_ARCH_GET_ROOT_POINTER
-static inline u64 acpi_arch_get_root_pointer(void)
-{
-	return x86_init.acpi.get_root_pointer();
-}
-
-void acpi_generic_reduced_hw_init(void);
-
 #else /* !CONFIG_ACPI */
 
 #define acpi_lapic 0
@@ -150,8 +141,6 @@ void acpi_generic_reduced_hw_init(void);
 static inline void acpi_noirq_set(void) { }
 static inline void acpi_disable_pci(void) { }
 static inline void disable_acpi(void) { }
-
-static inline void acpi_generic_reduced_hw_init(void) { }
 
 #endif /* !CONFIG_ACPI */
 

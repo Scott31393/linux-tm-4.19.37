@@ -62,6 +62,8 @@ unsigned short sii164GetDeviceID(void)
 	return deviceID;
 }
 
+
+
 /* DVI.C will handle all SiI164 chip stuffs and try it best to make code minimal and useful */
 
 /*
@@ -237,6 +239,10 @@ long sii164InitChip(unsigned char edgeSelect,
 	return -1;
 }
 
+
+
+
+
 /* below sii164 function is not necessary */
 
 #ifdef SII164_FULL_FUNCTIONS
@@ -291,8 +297,7 @@ void sii164SetPower(unsigned char powerUp)
  *  sii164SelectHotPlugDetectionMode
  *      This function selects the mode of the hot plug detection.
  */
-static
-void sii164SelectHotPlugDetectionMode(enum sii164_hot_plug_mode hotPlugMode)
+static void sii164SelectHotPlugDetectionMode(sii164_hot_plug_mode_t hotPlugMode)
 {
 	unsigned char detectReg;
 
@@ -396,3 +401,5 @@ void sii164ClearInterrupt(void)
 #endif
 
 #endif
+
+

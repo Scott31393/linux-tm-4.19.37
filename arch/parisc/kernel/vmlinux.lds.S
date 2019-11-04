@@ -100,9 +100,7 @@ SECTIONS
 	. = ALIGN(16);
 	/* Linkage tables */
 	.opd : {
-		__start_opd = .;
 		*(.opd)
-		__end_opd = .;
 	} PROVIDE (__gp = .);
 	.plt : {
 		*(.plt)

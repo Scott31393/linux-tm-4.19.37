@@ -103,9 +103,6 @@ static struct tegra_fuse *fuse = &(struct tegra_fuse) {
 };
 
 static const struct of_device_id tegra_fuse_match[] = {
-#ifdef CONFIG_ARCH_TEGRA_186_SOC
-	{ .compatible = "nvidia,tegra186-efuse", .data = &tegra186_fuse_soc },
-#endif
 #ifdef CONFIG_ARCH_TEGRA_210_SOC
 	{ .compatible = "nvidia,tegra210-efuse", .data = &tegra210_fuse_soc },
 #endif
@@ -135,19 +132,14 @@ static int tegra_fuse_probe(struct platform_device *pdev)
 
 	/* take over the memory region from the early initialization */
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
-	fuse->phys = res->start;
 	fuse->base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(fuse->base)) {
-		err = PTR_ERR(fuse->base);
-		fuse->base = base;
-		return err;
-	}
+	if (IS_ERR(fuse->base))
+		return PTR_ERR(fuse->base);
 
 	fuse->clk = devm_clk_get(&pdev->dev, "fuse");
 	if (IS_ERR(fuse->clk)) {
 		dev_err(&pdev->dev, "failed to get FUSE clock: %ld",
 			PTR_ERR(fuse->clk));
-		fuse->base = base;
 		return PTR_ERR(fuse->clk);
 	}
 
@@ -156,10 +148,8 @@ static int tegra_fuse_probe(struct platform_device *pdev)
 
 	if (fuse->soc->probe) {
 		err = fuse->soc->probe(fuse);
-		if (err < 0) {
-			fuse->base = base;
+		if (err < 0)
 			return err;
-		}
 	}
 
 	if (tegra_fuse_create_sysfs(&pdev->dev, fuse->soc->info->size,

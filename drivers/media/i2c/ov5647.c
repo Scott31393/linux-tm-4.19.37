@@ -21,7 +21,6 @@
 
 #include <linux/clk.h>
 #include <linux/delay.h>
-#include <linux/gpio/consumer.h>
 #include <linux/i2c.h>
 #include <linux/init.h>
 #include <linux/io.h>
@@ -36,26 +35,9 @@
 
 #define SENSOR_NAME "ov5647"
 
-/*
- * From the datasheet, "20ms after PWDN goes low or 20ms after RESETB goes
- * high if reset is inserted after PWDN goes high, host can access sensor's
- * SCCB to initialize sensor."
- */
-#define PWDN_ACTIVE_DELAY_MS	20
-
-#define MIPI_CTRL00_CLOCK_LANE_GATE		BIT(5)
-#define MIPI_CTRL00_LINE_SYNC_ENABLE		BIT(4)
-#define MIPI_CTRL00_BUS_IDLE			BIT(2)
-#define MIPI_CTRL00_CLOCK_LANE_DISABLE		BIT(0)
-
-#define OV5647_SW_STANDBY		0x0100
-#define OV5647_SW_RESET			0x0103
-#define OV5647_REG_CHIPID_H		0x300A
-#define OV5647_REG_CHIPID_L		0x300B
-#define OV5640_REG_PAD_OUT		0x300D
-#define OV5647_REG_FRAME_OFF_NUMBER	0x4202
-#define OV5647_REG_MIPI_CTRL00		0x4800
-#define OV5647_REG_MIPI_CTRL14		0x4814
+#define OV5647_SW_RESET		0x0103
+#define OV5647_REG_CHIPID_H	0x300A
+#define OV5647_REG_CHIPID_L	0x300B
 
 #define REG_TERM 0xfffe
 #define VAL_TERM 0xfe
@@ -95,8 +77,6 @@ struct ov5647 {
 	unsigned int			height;
 	int				power_count;
 	struct clk			*xclk;
-	struct gpio_desc		*pwdn;
-	unsigned int			flags;
 };
 
 static inline struct ov5647 *to_state(struct v4l2_subdev *sd)
@@ -261,49 +241,34 @@ static int ov5647_set_virtual_channel(struct v4l2_subdev *sd, int channel)
 	u8 channel_id;
 	int ret;
 
-	ret = ov5647_read(sd, OV5647_REG_MIPI_CTRL14, &channel_id);
+	ret = ov5647_read(sd, 0x4814, &channel_id);
 	if (ret < 0)
 		return ret;
 
 	channel_id &= ~(3 << 6);
-	return ov5647_write(sd, OV5647_REG_MIPI_CTRL14, channel_id | (channel << 6));
+	return ov5647_write(sd, 0x4814, channel_id | (channel << 6));
 }
 
 static int ov5647_stream_on(struct v4l2_subdev *sd)
 {
-	struct ov5647 *ov5647 = to_state(sd);
-	u8 val = MIPI_CTRL00_BUS_IDLE;
 	int ret;
 
-	if (ov5647->flags & V4L2_MBUS_CSI2_NONCONTINUOUS_CLOCK)
-		val |= MIPI_CTRL00_CLOCK_LANE_GATE |
-		       MIPI_CTRL00_LINE_SYNC_ENABLE;
-
-	ret = ov5647_write(sd, OV5647_REG_MIPI_CTRL00, val);
+	ret = ov5647_write(sd, 0x4202, 0x00);
 	if (ret < 0)
 		return ret;
 
-	ret = ov5647_write(sd, OV5647_REG_FRAME_OFF_NUMBER, 0x00);
-	if (ret < 0)
-		return ret;
-
-	return ov5647_write(sd, OV5640_REG_PAD_OUT, 0x00);
+	return ov5647_write(sd, 0x300D, 0x00);
 }
 
 static int ov5647_stream_off(struct v4l2_subdev *sd)
 {
 	int ret;
 
-	ret = ov5647_write(sd, OV5647_REG_MIPI_CTRL00, MIPI_CTRL00_CLOCK_LANE_GATE
-			   | MIPI_CTRL00_BUS_IDLE | MIPI_CTRL00_CLOCK_LANE_DISABLE);
+	ret = ov5647_write(sd, 0x4202, 0x0f);
 	if (ret < 0)
 		return ret;
 
-	ret = ov5647_write(sd, OV5647_REG_FRAME_OFF_NUMBER, 0x0f);
-	if (ret < 0)
-		return ret;
-
-	return ov5647_write(sd, OV5640_REG_PAD_OUT, 0x01);
+	return ov5647_write(sd, 0x300D, 0x01);
 }
 
 static int set_sw_standby(struct v4l2_subdev *sd, bool standby)
@@ -311,7 +276,7 @@ static int set_sw_standby(struct v4l2_subdev *sd, bool standby)
 	int ret;
 	u8 rdval;
 
-	ret = ov5647_read(sd, OV5647_SW_STANDBY, &rdval);
+	ret = ov5647_read(sd, 0x0100, &rdval);
 	if (ret < 0)
 		return ret;
 
@@ -320,7 +285,7 @@ static int set_sw_standby(struct v4l2_subdev *sd, bool standby)
 	else
 		rdval |= 0x01;
 
-	return ov5647_write(sd, OV5647_SW_STANDBY, rdval);
+	return ov5647_write(sd, 0x0100, rdval);
 }
 
 static int __sensor_init(struct v4l2_subdev *sd)
@@ -329,7 +294,7 @@ static int __sensor_init(struct v4l2_subdev *sd)
 	u8 resetval, rdval;
 	struct i2c_client *client = v4l2_get_subdevdata(sd);
 
-	ret = ov5647_read(sd, OV5647_SW_STANDBY, &rdval);
+	ret = ov5647_read(sd, 0x0100, &rdval);
 	if (ret < 0)
 		return ret;
 
@@ -344,21 +309,18 @@ static int __sensor_init(struct v4l2_subdev *sd)
 	if (ret < 0)
 		return ret;
 
-	ret = ov5647_read(sd, OV5647_SW_STANDBY, &resetval);
+	ret = ov5647_read(sd, 0x0100, &resetval);
 	if (ret < 0)
 		return ret;
 
 	if (!(resetval & 0x01)) {
 		dev_err(&client->dev, "Device was in SW standby");
-		ret = ov5647_write(sd, OV5647_SW_STANDBY, 0x01);
+		ret = ov5647_write(sd, 0x0100, 0x01);
 		if (ret < 0)
 			return ret;
 	}
 
-	/*
-	 * stream off to make the clock lane into LP-11 state.
-	 */
-	return ov5647_stream_off(sd);
+	return ov5647_write(sd, 0x4800, 0x04);
 }
 
 static int ov5647_sensor_power(struct v4l2_subdev *sd, int on)
@@ -371,11 +333,6 @@ static int ov5647_sensor_power(struct v4l2_subdev *sd, int on)
 
 	if (on && !ov5647->power_count)	{
 		dev_dbg(&client->dev, "OV5647 power on\n");
-
-		if (ov5647->pwdn) {
-			gpiod_set_value_cansleep(ov5647->pwdn, 0);
-			msleep(PWDN_ACTIVE_DELAY_MS);
-		}
 
 		ret = clk_prepare_enable(ov5647->xclk);
 		if (ret < 0) {
@@ -414,8 +371,6 @@ static int ov5647_sensor_power(struct v4l2_subdev *sd, int on)
 			dev_dbg(&client->dev, "soft stby failed\n");
 
 		clk_disable_unprepare(ov5647->xclk);
-
-		gpiod_set_value_cansleep(ov5647->pwdn, 1);
 	}
 
 	/* Update the power count. */
@@ -452,8 +407,8 @@ static int ov5647_sensor_set_register(struct v4l2_subdev *sd,
 }
 #endif
 
-/*
- * Subdev core operations registration
+/**
+ * @short Subdev core operations registration
  */
 static const struct v4l2_subdev_core_ops ov5647_subdev_core_ops = {
 	.s_power		= ov5647_sensor_power,
@@ -487,30 +442,8 @@ static int ov5647_enum_mbus_code(struct v4l2_subdev *sd,
 	return 0;
 }
 
-static int ov5647_set_get_fmt(struct v4l2_subdev *sd,
-			      struct v4l2_subdev_pad_config *cfg,
-			      struct v4l2_subdev_format *format)
-{
-	struct v4l2_mbus_framefmt *fmt = &format->format;
-
-	if (format->pad != 0)
-		return -EINVAL;
-
-	/* Only one format is supported, so return that */
-	memset(fmt, 0, sizeof(*fmt));
-	fmt->code = MEDIA_BUS_FMT_SBGGR8_1X8;
-	fmt->colorspace = V4L2_COLORSPACE_SRGB;
-	fmt->field = V4L2_FIELD_NONE;
-	fmt->width = 640;
-	fmt->height = 480;
-
-	return 0;
-}
-
 static const struct v4l2_subdev_pad_ops ov5647_subdev_pad_ops = {
 	.enum_mbus_code = ov5647_enum_mbus_code,
-	.set_fmt =	  ov5647_set_get_fmt,
-	.get_fmt =	  ov5647_set_get_fmt,
 };
 
 static const struct v4l2_subdev_ops ov5647_subdev_ops = {
@@ -576,7 +509,7 @@ static const struct v4l2_subdev_internal_ops ov5647_subdev_internal_ops = {
 	.open = ov5647_open,
 };
 
-static int ov5647_parse_dt(struct device_node *np, struct ov5647 *sensor)
+static int ov5647_parse_dt(struct device_node *np)
 {
 	struct v4l2_fwnode_endpoint bus_cfg;
 	struct device_node *ep;
@@ -588,9 +521,6 @@ static int ov5647_parse_dt(struct device_node *np, struct ov5647 *sensor)
 		return -EINVAL;
 
 	ret = v4l2_fwnode_endpoint_parse(of_fwnode_handle(ep), &bus_cfg);
-
-	if (!ret)
-		sensor->flags = bus_cfg.bus.mipi_csi2.flags;
 
 	of_node_put(ep);
 	return ret;
@@ -611,7 +541,7 @@ static int ov5647_probe(struct i2c_client *client,
 		return -ENOMEM;
 
 	if (IS_ENABLED(CONFIG_OF) && np) {
-		ret = ov5647_parse_dt(np, sensor);
+		ret = ov5647_parse_dt(np);
 		if (ret) {
 			dev_err(dev, "DT parsing error: %d\n", ret);
 			return ret;
@@ -631,10 +561,6 @@ static int ov5647_probe(struct i2c_client *client,
 		return -EINVAL;
 	}
 
-	/* Request the power down GPIO asserted */
-	sensor->pwdn = devm_gpiod_get_optional(&client->dev, "pwdn",
-					       GPIOD_OUT_HIGH);
-
 	mutex_init(&sensor->lock);
 
 	sd = &sensor->sd;
@@ -648,15 +574,7 @@ static int ov5647_probe(struct i2c_client *client,
 	if (ret < 0)
 		goto mutex_remove;
 
-	if (sensor->pwdn) {
-		gpiod_set_value_cansleep(sensor->pwdn, 0);
-		msleep(PWDN_ACTIVE_DELAY_MS);
-	}
-
 	ret = ov5647_detect(sd);
-
-	gpiod_set_value_cansleep(sensor->pwdn, 1);
-
 	if (ret < 0)
 		goto error;
 

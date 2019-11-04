@@ -53,6 +53,12 @@
 	CON_INITCALL
   }
 
+  .uml.initcall.init : {
+	__uml_initcall_start = .;
+	*(.uml.initcall.init)
+	__uml_initcall_end = .;
+  }
+
   SECURITY_INIT
 
   .exitcall : {

@@ -38,8 +38,9 @@
 #include "nfp_net.h"
 #include "nfp_port.h"
 
-int nfp_app_nic_vnic_init_phy_port(struct nfp_pf *pf, struct nfp_app *app,
-				   struct nfp_net *nn, unsigned int id)
+static int
+nfp_app_nic_vnic_init_phy_port(struct nfp_pf *pf, struct nfp_app *app,
+			       struct nfp_net *nn, unsigned int id)
 {
 	int err;
 
@@ -68,7 +69,7 @@ int nfp_app_nic_vnic_alloc(struct nfp_app *app, struct nfp_net *nn,
 	if (err)
 		return err < 0 ? err : 0;
 
-	nfp_net_get_mac_addr(app->pf, nn->dp.netdev, nn->port);
+	nfp_net_get_mac_addr(app->pf, nn->port);
 
 	return 0;
 }

@@ -164,10 +164,9 @@ static void rpwm_workitem_callback(struct work_struct *work)
 	}
 }
 
-static void rpwm_check_handler (struct timer_list *t)
+static void rpwm_check_handler (unsigned long data)
 {
-	struct _adapter *adapter =
-		from_timer(adapter, t, pwrctrlpriv.rpwm_check_timer);
+	struct _adapter *adapter = (struct _adapter *)data;
 
 	_rpwm_check_handler(adapter);
 }
@@ -186,7 +185,8 @@ void r8712_init_pwrctrl_priv(struct _adapter *padapter)
 	r8712_write8(padapter, 0x1025FE58, 0);
 	INIT_WORK(&pwrctrlpriv->SetPSModeWorkItem, SetPSModeWorkItemCallback);
 	INIT_WORK(&pwrctrlpriv->rpwm_workitem, rpwm_workitem_callback);
-	timer_setup(&pwrctrlpriv->rpwm_check_timer, rpwm_check_handler, 0);
+	setup_timer(&pwrctrlpriv->rpwm_check_timer, rpwm_check_handler,
+		    (unsigned long)padapter);
 }
 
 /*

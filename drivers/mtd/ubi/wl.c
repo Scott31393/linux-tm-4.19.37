@@ -692,7 +692,7 @@ static int wear_leveling_worker(struct ubi_device *ubi, struct ubi_work *wrk,
 #ifdef CONFIG_MTD_UBI_FASTMAP
 	/* Check whether we need to produce an anchor PEB */
 	if (!anchor)
-		anchor = !anchor_pebs_available(&ubi->free);
+		anchor = !anchor_pebs_avalible(&ubi->free);
 
 	if (anchor) {
 		e1 = find_anchor_wl_entry(&ubi->used);
@@ -1592,7 +1592,7 @@ int ubi_wl_init(struct ubi_device *ubi, struct ubi_attach_info *ai)
 	sprintf(ubi->bgt_name, UBI_BGT_NAME_PATTERN, ubi->ubi_num);
 
 	err = -ENOMEM;
-	ubi->lookuptbl = kcalloc(ubi->peb_count, sizeof(void *), GFP_KERNEL);
+	ubi->lookuptbl = kzalloc(ubi->peb_count * sizeof(void *), GFP_KERNEL);
 	if (!ubi->lookuptbl)
 		return err;
 
@@ -1615,10 +1615,8 @@ int ubi_wl_init(struct ubi_device *ubi, struct ubi_attach_info *ai)
 		cond_resched();
 
 		e = kmem_cache_alloc(ubi_wl_entry_slab, GFP_KERNEL);
-		if (!e) {
-			err = -ENOMEM;
+		if (!e)
 			goto out_free;
-		}
 
 		e->pnum = aeb->pnum;
 		e->ec = aeb->ec;
@@ -1637,10 +1635,8 @@ int ubi_wl_init(struct ubi_device *ubi, struct ubi_attach_info *ai)
 			cond_resched();
 
 			e = kmem_cache_alloc(ubi_wl_entry_slab, GFP_KERNEL);
-			if (!e) {
-				err = -ENOMEM;
+			if (!e)
 				goto out_free;
-			}
 
 			e->pnum = aeb->pnum;
 			e->ec = aeb->ec;

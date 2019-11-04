@@ -309,11 +309,6 @@ static inline void flush_tlb_others(const struct cpumask *cpumask,
 	PVOP_VCALL2(pv_mmu_ops.flush_tlb_others, cpumask, info);
 }
 
-static inline void paravirt_tlb_remove_table(struct mmu_gather *tlb, void *table)
-{
-	PVOP_VCALL2(pv_mmu_ops.tlb_remove_table, tlb, table);
-}
-
 static inline int paravirt_pgd_alloc(struct mm_struct *mm)
 {
 	return PVOP_CALL1(int, pv_mmu_ops.pgd_alloc, mm);
@@ -573,22 +568,17 @@ static inline p4dval_t p4d_val(p4d_t p4d)
 	return PVOP_CALLEE1(p4dval_t, pv_mmu_ops.p4d_val, p4d.p4d);
 }
 
-static inline void __set_pgd(pgd_t *pgdp, pgd_t pgd)
+static inline void set_pgd(pgd_t *pgdp, pgd_t pgd)
 {
-	PVOP_VCALL2(pv_mmu_ops.set_pgd, pgdp, native_pgd_val(pgd));
+	pgdval_t val = native_pgd_val(pgd);
+
+	PVOP_VCALL2(pv_mmu_ops.set_pgd, pgdp, val);
 }
 
-#define set_pgd(pgdp, pgdval) do {					\
-	if (pgtable_l5_enabled())						\
-		__set_pgd(pgdp, pgdval);				\
-	else								\
-		set_p4d((p4d_t *)(pgdp), (p4d_t) { (pgdval).pgd });	\
-} while (0)
-
-#define pgd_clear(pgdp) do {						\
-	if (pgtable_l5_enabled())						\
-		set_pgd(pgdp, __pgd(0));				\
-} while (0)
+static inline void pgd_clear(pgd_t *pgdp)
+{
+	set_pgd(pgdp, __pgd(0));
+}
 
 #endif  /* CONFIG_PGTABLE_LEVELS == 5 */
 

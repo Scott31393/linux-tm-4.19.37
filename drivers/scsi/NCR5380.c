@@ -1908,6 +1908,8 @@ static void NCR5380_information_transfer(struct Scsi_Host *instance)
 						switch (extended_msg[2]) {
 						case EXTENDED_SDTR:
 						case EXTENDED_WDTR:
+						case EXTENDED_MODIFY_DATA_POINTER:
+						case EXTENDED_EXTENDED_IDENTIFY:
 							tmp = 0;
 						}
 					} else if (len) {
@@ -1930,14 +1932,18 @@ static void NCR5380_information_transfer(struct Scsi_Host *instance)
 					 * reject it.
 					 */
 				default:
-					if (tmp == EXTENDED_MESSAGE)
+					if (!tmp) {
+						shost_printk(KERN_ERR, instance, "rejecting message ");
+						spi_print_msg(extended_msg);
+						printk("\n");
+					} else if (tmp != EXTENDED_MESSAGE)
+						scmd_printk(KERN_INFO, cmd,
+						            "rejecting unknown message %02x\n",
+						            tmp);
+					else
 						scmd_printk(KERN_INFO, cmd,
 						            "rejecting unknown extended message code %02x, length %d\n",
-						            extended_msg[2], extended_msg[1]);
-					else if (tmp)
-						scmd_printk(KERN_INFO, cmd,
-						            "rejecting unknown message code %02x\n",
-						            tmp);
+						            extended_msg[1], extended_msg[0]);
 
 					msgout = MESSAGE_REJECT;
 					NCR5380_write(INITIATOR_COMMAND_REG, ICR_BASE | ICR_ASSERT_ATN);

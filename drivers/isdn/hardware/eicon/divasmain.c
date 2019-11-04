@@ -654,12 +654,12 @@ static ssize_t divas_read(struct file *file, char __user *buf,
 	return (ret);
 }
 
-static __poll_t divas_poll(struct file *file, poll_table *wait)
+static unsigned int divas_poll(struct file *file, poll_table *wait)
 {
 	if (!file->private_data) {
-		return (EPOLLERR);
+		return (POLLERR);
 	}
-	return (EPOLLIN | EPOLLRDNORM);
+	return (POLLIN | POLLRDNORM);
 }
 
 static const struct file_operations divas_fops = {

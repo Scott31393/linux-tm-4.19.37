@@ -22,9 +22,9 @@
 #include "tpm.h"
 #include "tpm-dev.h"
 
-static void user_reader_timeout(struct timer_list *t)
+static void user_reader_timeout(unsigned long ptr)
 {
-	struct file_priv *priv = from_timer(priv, t, user_read_timer);
+	struct file_priv *priv = (struct file_priv *)ptr;
 
 	pr_warn("TPM user space timeout is deprecated (pid=%d)\n",
 		task_tgid_nr(current));
@@ -47,7 +47,8 @@ void tpm_common_open(struct file *file, struct tpm_chip *chip,
 {
 	priv->chip = chip;
 	mutex_init(&priv->buffer_mutex);
-	timer_setup(&priv->user_read_timer, user_reader_timeout, 0);
+	setup_timer(&priv->user_read_timer, user_reader_timeout,
+			(unsigned long)priv);
 	INIT_WORK(&priv->work, timeout_work);
 
 	file->private_data = priv;

@@ -42,9 +42,8 @@ int __must_check clk_bulk_get(struct device *dev, int num_clks,
 		clks[i].clk = clk_get(dev, clks[i].id);
 		if (IS_ERR(clks[i].clk)) {
 			ret = PTR_ERR(clks[i].clk);
-			if (ret != -EPROBE_DEFER)
-				dev_err(dev, "Failed to get clk '%s': %d\n",
-					clks[i].id, ret);
+			dev_err(dev, "Failed to get clk '%s': %d\n",
+				clks[i].id, ret);
 			clks[i].clk = NULL;
 			goto err;
 		}

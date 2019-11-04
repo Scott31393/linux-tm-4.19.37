@@ -69,8 +69,6 @@
 #include <setjmp.h>
 #include <stdbool.h>
 
-#include "../kselftest.h"
-
 #ifdef __NR_userfaultfd
 
 static unsigned long nr_cpus, nr_pages, nr_pages_per_cpu, page_size;
@@ -1324,7 +1322,7 @@ int main(int argc, char **argv)
 int main(void)
 {
 	printf("skip: Skipping userfaultfd test (missing __NR_userfaultfd)\n");
-	return KSFT_SKIP;
+	return 0;
 }
 
 #endif /* __NR_userfaultfd */

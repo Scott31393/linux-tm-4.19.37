@@ -75,17 +75,24 @@ static struct property *dlpar_parse_cc_property(struct cc_workarea *ccwa)
 	return prop;
 }
 
-static struct device_node *dlpar_parse_cc_node(struct cc_workarea *ccwa)
+static struct device_node *dlpar_parse_cc_node(struct cc_workarea *ccwa,
+					       const char *path)
 {
 	struct device_node *dn;
-	const char *name;
+	char *name;
+
+	/* If parent node path is "/" advance path to NULL terminator to
+	 * prevent double leading slashs in full_name.
+	 */
+	if (!path[1])
+		path++;
 
 	dn = kzalloc(sizeof(*dn), GFP_KERNEL);
 	if (!dn)
 		return NULL;
 
-	name = (const char *)ccwa + be32_to_cpu(ccwa->name_offset);
-	dn->full_name = kstrdup(name, GFP_KERNEL);
+	name = (char *)ccwa + be32_to_cpu(ccwa->name_offset);
+	dn->full_name = kasprintf(GFP_KERNEL, "%s/%s", path, name);
 	if (!dn->full_name) {
 		kfree(dn);
 		return NULL;
@@ -141,6 +148,7 @@ struct device_node *dlpar_configure_connector(__be32 drc_index,
 	struct property *last_property = NULL;
 	struct cc_workarea *ccwa;
 	char *data_buf;
+	const char *parent_path = parent->full_name;
 	int cc_token;
 	int rc = -1;
 
@@ -174,7 +182,7 @@ struct device_node *dlpar_configure_connector(__be32 drc_index,
 			break;
 
 		case NEXT_SIBLING:
-			dn = dlpar_parse_cc_node(ccwa);
+			dn = dlpar_parse_cc_node(ccwa, parent_path);
 			if (!dn)
 				goto cc_error;
 
@@ -184,7 +192,10 @@ struct device_node *dlpar_configure_connector(__be32 drc_index,
 			break;
 
 		case NEXT_CHILD:
-			dn = dlpar_parse_cc_node(ccwa);
+			if (first_dn)
+				parent_path = last_dn->full_name;
+
+			dn = dlpar_parse_cc_node(ccwa, parent_path);
 			if (!dn)
 				goto cc_error;
 
@@ -215,6 +226,7 @@ struct device_node *dlpar_configure_connector(__be32 drc_index,
 
 		case PREV_PARENT:
 			last_dn = last_dn->parent;
+			parent_path = last_dn->parent->full_name;
 			break;
 
 		case CALL_AGAIN:
@@ -271,8 +283,6 @@ int dlpar_detach_node(struct device_node *dn)
 	rc = of_detach_node(dn);
 	if (rc)
 		return rc;
-
-	of_node_put(dn);
 
 	return 0;
 }

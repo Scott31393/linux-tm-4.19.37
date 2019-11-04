@@ -458,7 +458,6 @@ static void cpcap_usb_detect(struct work_struct *work)
 			goto out_err;
 	}
 
-	power_supply_changed(ddata->usb);
 	return;
 
 out_err:
@@ -485,7 +484,7 @@ static int cpcap_usb_init_irq(struct platform_device *pdev,
 	int irq, error;
 
 	irq = platform_get_irq_byname(pdev, name);
-	if (irq < 0)
+	if (!irq)
 		return -ENODEV;
 
 	error = devm_request_threaded_irq(ddata->dev, irq, NULL,

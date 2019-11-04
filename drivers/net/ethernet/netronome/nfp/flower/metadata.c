@@ -99,18 +99,14 @@ static int nfp_get_stats_entry(struct nfp_app *app, u32 *stats_context_id)
 
 /* Must be called with either RTNL or rcu_read_lock */
 struct nfp_fl_payload *
-nfp_flower_search_fl_table(struct nfp_app *app, unsigned long tc_flower_cookie,
-			   struct net_device *netdev, __be32 host_ctx)
+nfp_flower_search_fl_table(struct nfp_app *app, unsigned long tc_flower_cookie)
 {
 	struct nfp_flower_priv *priv = app->priv;
 	struct nfp_fl_payload *flower_entry;
 
 	hash_for_each_possible_rcu(priv->flow_table, flower_entry, link,
 				   tc_flower_cookie)
-		if (flower_entry->tc_flower_cookie == tc_flower_cookie &&
-		    (!netdev || flower_entry->ingress_dev == netdev) &&
-		    (host_ctx == NFP_FL_STATS_CTX_DONT_CARE ||
-		     flower_entry->meta.host_ctx_id == host_ctx))
+		if (flower_entry->tc_flower_cookie == tc_flower_cookie)
 			return flower_entry;
 
 	return NULL;
@@ -125,9 +121,11 @@ nfp_flower_update_stats(struct nfp_app *app, struct nfp_fl_stats_frame *stats)
 	flower_cookie = be64_to_cpu(stats->stats_cookie);
 
 	rcu_read_lock();
-	nfp_flow = nfp_flower_search_fl_table(app, flower_cookie, NULL,
-					      stats->stats_con_id);
+	nfp_flow = nfp_flower_search_fl_table(app, flower_cookie);
 	if (!nfp_flow)
+		goto exit_rcu_unlock;
+
+	if (nfp_flow->meta.host_ctx_id != stats->stats_con_id)
 		goto exit_rcu_unlock;
 
 	spin_lock(&nfp_flow->lock);
@@ -142,7 +140,7 @@ exit_rcu_unlock:
 
 void nfp_flower_rx_flow_stats(struct nfp_app *app, struct sk_buff *skb)
 {
-	unsigned int msg_len = nfp_flower_cmsg_get_data_len(skb);
+	unsigned int msg_len = skb->len - NFP_FLOWER_CMSG_HLEN;
 	struct nfp_fl_stats_frame *stats_frame;
 	unsigned char *msg;
 	int i;
@@ -158,6 +156,7 @@ static int nfp_release_mask_id(struct nfp_app *app, u8 mask_id)
 {
 	struct nfp_flower_priv *priv = app->priv;
 	struct circ_buf *ring;
+	struct timespec64 now;
 
 	ring = &priv->mask_ids.mask_id_free_list;
 	/* Checking if buffer is full. */
@@ -168,7 +167,8 @@ static int nfp_release_mask_id(struct nfp_app *app, u8 mask_id)
 	ring->head = (ring->head + NFP_FLOWER_MASK_ELEMENT_RS) %
 		     (NFP_FLOWER_MASK_ENTRY_RS * NFP_FLOWER_MASK_ELEMENT_RS);
 
-	priv->mask_ids.last_used[mask_id] = ktime_get();
+	getnstimeofday64(&now);
+	priv->mask_ids.last_used[mask_id] = now;
 
 	return 0;
 }
@@ -176,7 +176,7 @@ static int nfp_release_mask_id(struct nfp_app *app, u8 mask_id)
 static int nfp_mask_alloc(struct nfp_app *app, u8 *mask_id)
 {
 	struct nfp_flower_priv *priv = app->priv;
-	ktime_t reuse_timeout;
+	struct timespec64 delta, now;
 	struct circ_buf *ring;
 	u8 temp_id, freed_id;
 
@@ -196,10 +196,10 @@ static int nfp_mask_alloc(struct nfp_app *app, u8 *mask_id)
 	memcpy(&temp_id, &ring->buf[ring->tail], NFP_FLOWER_MASK_ELEMENT_RS);
 	*mask_id = temp_id;
 
-	reuse_timeout = ktime_add_ns(priv->mask_ids.last_used[*mask_id],
-				     NFP_FL_MASK_REUSE_TIME_NS);
+	getnstimeofday64(&now);
+	delta = timespec64_sub(now, priv->mask_ids.last_used[*mask_id]);
 
-	if (ktime_before(ktime_get(), reuse_timeout))
+	if (timespec64_to_ns(&delta) < NFP_FL_MASK_REUSE_TIME_NS)
 		goto err_not_found;
 
 	memcpy(&ring->buf[ring->tail], &freed_id, NFP_FLOWER_MASK_ELEMENT_RS);
@@ -317,8 +317,7 @@ nfp_check_mask_remove(struct nfp_app *app, char *mask_data, u32 mask_len,
 
 int nfp_compile_flow_metadata(struct nfp_app *app,
 			      struct tc_cls_flower_offload *flow,
-			      struct nfp_fl_payload *nfp_flow,
-			      struct net_device *netdev)
+			      struct nfp_fl_payload *nfp_flow)
 {
 	struct nfp_flower_priv *priv = app->priv;
 	struct nfp_fl_payload *check_entry;
@@ -349,8 +348,7 @@ int nfp_compile_flow_metadata(struct nfp_app *app,
 	nfp_flow->stats.bytes = 0;
 	nfp_flow->stats.used = jiffies;
 
-	check_entry = nfp_flower_search_fl_table(app, flow->cookie, netdev,
-						 NFP_FL_STATS_CTX_DONT_CARE);
+	check_entry = nfp_flower_search_fl_table(app, flow->cookie);
 	if (check_entry) {
 		if (nfp_release_stats_entry(app, stats_cxt))
 			return -EINVAL;
@@ -415,8 +413,7 @@ int nfp_flower_metadata_init(struct nfp_app *app)
 
 	/* Init ring buffer and unallocated stats_ids. */
 	priv->stats_ids.free_list.buf =
-		vmalloc(array_size(NFP_FL_STATS_ELEM_RS,
-				   NFP_FL_STATS_ENTRY_RS));
+		vmalloc(NFP_FL_STATS_ENTRY_RS * NFP_FL_STATS_ELEM_RS);
 	if (!priv->stats_ids.free_list.buf)
 		goto err_free_last_used;
 

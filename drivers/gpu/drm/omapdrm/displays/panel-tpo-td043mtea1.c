@@ -340,25 +340,16 @@ static void tpo_td043_power_off(struct panel_drv_data *ddata)
 static int tpo_td043_connect(struct omap_dss_device *dssdev)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
-	struct omap_dss_device *in;
+	struct omap_dss_device *in = ddata->in;
 	int r;
 
 	if (omapdss_device_is_connected(dssdev))
 		return 0;
 
-	in = omapdss_of_find_source_for_first_ep(dssdev->dev->of_node);
-	if (IS_ERR(in)) {
-		dev_err(dssdev->dev, "failed to find video source\n");
-		return PTR_ERR(in);
-	}
-
 	r = in->ops.dpi->connect(in, dssdev);
-	if (r) {
-		omap_dss_put_device(in);
+	if (r)
 		return r;
-	}
 
-	ddata->in = in;
 	return 0;
 }
 
@@ -371,9 +362,6 @@ static void tpo_td043_disconnect(struct omap_dss_device *dssdev)
 		return;
 
 	in->ops.dpi->disconnect(in, dssdev);
-
-	omap_dss_put_device(in);
-	ddata->in = NULL;
 }
 
 static int tpo_td043_enable(struct omap_dss_device *dssdev)
@@ -475,6 +463,7 @@ static int tpo_td043_probe_of(struct spi_device *spi)
 {
 	struct device_node *node = spi->dev.of_node;
 	struct panel_drv_data *ddata = dev_get_drvdata(&spi->dev);
+	struct omap_dss_device *in;
 	int gpio;
 
 	gpio = of_get_named_gpio(node, "reset-gpios", 0);
@@ -483,6 +472,14 @@ static int tpo_td043_probe_of(struct spi_device *spi)
 		return gpio;
 	}
 	ddata->nreset_gpio = gpio;
+
+	in = omapdss_of_find_source_for_first_ep(node);
+	if (IS_ERR(in)) {
+		dev_err(&spi->dev, "failed to find video source\n");
+		return PTR_ERR(in);
+	}
+
+	ddata->in = in;
 
 	return 0;
 }
@@ -511,6 +508,9 @@ static int tpo_td043_probe(struct spi_device *spi)
 	dev_set_drvdata(&spi->dev, ddata);
 
 	ddata->spi = spi;
+
+	if (!spi->dev.of_node)
+		return -ENODEV;
 
 	r = tpo_td043_probe_of(spi);
 	if (r)
@@ -564,6 +564,7 @@ err_reg:
 err_sysfs:
 err_gpio_req:
 err_regulator:
+	omap_dss_put_device(ddata->in);
 	return r;
 }
 
@@ -571,6 +572,7 @@ static int tpo_td043_remove(struct spi_device *spi)
 {
 	struct panel_drv_data *ddata = dev_get_drvdata(&spi->dev);
 	struct omap_dss_device *dssdev = &ddata->dssdev;
+	struct omap_dss_device *in = ddata->in;
 
 	dev_dbg(&ddata->spi->dev, "%s\n", __func__);
 
@@ -578,6 +580,8 @@ static int tpo_td043_remove(struct spi_device *spi)
 
 	tpo_td043_disable(dssdev);
 	tpo_td043_disconnect(dssdev);
+
+	omap_dss_put_device(in);
 
 	sysfs_remove_group(&spi->dev.kobj, &tpo_td043_attr_group);
 

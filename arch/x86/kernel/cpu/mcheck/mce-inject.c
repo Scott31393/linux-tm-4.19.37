@@ -491,7 +491,7 @@ static void do_inject(void)
 	unsigned int cpu = i_mce.extcpu;
 	u8 b = i_mce.bank;
 
-	i_mce.tsc = rdtsc_ordered();
+	rdtscll(i_mce.tsc);
 
 	if (i_mce.misc)
 		i_mce.status |= MCI_STATUS_MISCV;

@@ -384,8 +384,8 @@ static int compat_sock_setsockopt(struct socket *sock, int level, int optname,
 	return sock_setsockopt(sock, level, optname, optval, optlen);
 }
 
-static int __compat_sys_setsockopt(int fd, int level, int optname,
-				   char __user *optval, unsigned int optlen)
+COMPAT_SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
+		       char __user *, optval, unsigned int, optlen)
 {
 	int err;
 	struct socket *sock = sockfd_lookup(fd, &err);
@@ -409,12 +409,6 @@ static int __compat_sys_setsockopt(int fd, int level, int optname,
 		sockfd_put(sock);
 	}
 	return err;
-}
-
-COMPAT_SYSCALL_DEFINE5(setsockopt, int, fd, int, level, int, optname,
-		       char __user *, optval, unsigned int, optlen)
-{
-	return __compat_sys_setsockopt(fd, level, optname, optval, optlen);
 }
 
 static int do_get_sock_timeout(struct socket *sock, int level, int optname,
@@ -466,15 +460,14 @@ int compat_sock_get_timestamp(struct sock *sk, struct timeval __user *userstamp)
 
 	ctv = (struct compat_timeval __user *) userstamp;
 	err = -ENOENT;
-	sock_enable_timestamp(sk, SOCK_TIMESTAMP);
-	tv = ktime_to_timeval(sock_read_timestamp(sk));
-
+	if (!sock_flag(sk, SOCK_TIMESTAMP))
+		sock_enable_timestamp(sk, SOCK_TIMESTAMP);
+	tv = ktime_to_timeval(sk->sk_stamp);
 	if (tv.tv_sec == -1)
 		return err;
 	if (tv.tv_sec == 0) {
-		ktime_t kt = ktime_get_real();
-		sock_write_timestamp(sk, kt);
-		tv = ktime_to_timeval(kt);
+		sk->sk_stamp = ktime_get_real();
+		tv = ktime_to_timeval(sk->sk_stamp);
 	}
 	err = 0;
 	if (put_user(tv.tv_sec, &ctv->tv_sec) ||
@@ -495,14 +488,14 @@ int compat_sock_get_timestampns(struct sock *sk, struct timespec __user *usersta
 
 	ctv = (struct compat_timespec __user *) userstamp;
 	err = -ENOENT;
-	sock_enable_timestamp(sk, SOCK_TIMESTAMP);
-	ts = ktime_to_timespec(sock_read_timestamp(sk));
+	if (!sock_flag(sk, SOCK_TIMESTAMP))
+		sock_enable_timestamp(sk, SOCK_TIMESTAMP);
+	ts = ktime_to_timespec(sk->sk_stamp);
 	if (ts.tv_sec == -1)
 		return err;
 	if (ts.tv_sec == 0) {
-		ktime_t kt = ktime_get_real();
-		sock_write_timestamp(sk, kt);
-		ts = ktime_to_timespec(kt);
+		sk->sk_stamp = ktime_get_real();
+		ts = ktime_to_timespec(sk->sk_stamp);
 	}
 	err = 0;
 	if (put_user(ts.tv_sec, &ctv->tv_sec) ||
@@ -512,9 +505,8 @@ int compat_sock_get_timestampns(struct sock *sk, struct timespec __user *usersta
 }
 EXPORT_SYMBOL(compat_sock_get_timestampns);
 
-static int __compat_sys_getsockopt(int fd, int level, int optname,
-				   char __user *optval,
-				   int __user *optlen)
+COMPAT_SYSCALL_DEFINE5(getsockopt, int, fd, int, level, int, optname,
+		       char __user *, optval, int __user *, optlen)
 {
 	int err;
 	struct socket *sock = sockfd_lookup(fd, &err);
@@ -538,12 +530,6 @@ static int __compat_sys_getsockopt(int fd, int level, int optname,
 		sockfd_put(sock);
 	}
 	return err;
-}
-
-COMPAT_SYSCALL_DEFINE5(getsockopt, int, fd, int, level, int, optname,
-		       char __user *, optval, int __user *, optlen)
-{
-	return __compat_sys_getsockopt(fd, level, optname, optval, optlen);
 }
 
 struct compat_group_req {
@@ -750,72 +736,38 @@ static unsigned char nas[21] = {
 };
 #undef AL
 
-static inline long __compat_sys_sendmsg(int fd,
-					struct compat_msghdr __user *msg,
-					unsigned int flags)
+COMPAT_SYSCALL_DEFINE3(sendmsg, int, fd, struct compat_msghdr __user *, msg, unsigned int, flags)
 {
-	return __sys_sendmsg(fd, (struct user_msghdr __user *)msg,
-			     flags | MSG_CMSG_COMPAT, false);
-}
-
-COMPAT_SYSCALL_DEFINE3(sendmsg, int, fd, struct compat_msghdr __user *, msg,
-		       unsigned int, flags)
-{
-	return __compat_sys_sendmsg(fd, msg, flags);
-}
-
-static inline long __compat_sys_sendmmsg(int fd,
-					 struct compat_mmsghdr __user *mmsg,
-					 unsigned int vlen, unsigned int flags)
-{
-	return __sys_sendmmsg(fd, (struct mmsghdr __user *)mmsg, vlen,
-			      flags | MSG_CMSG_COMPAT, false);
+	return __sys_sendmsg(fd, (struct user_msghdr __user *)msg, flags | MSG_CMSG_COMPAT);
 }
 
 COMPAT_SYSCALL_DEFINE4(sendmmsg, int, fd, struct compat_mmsghdr __user *, mmsg,
 		       unsigned int, vlen, unsigned int, flags)
 {
-	return __compat_sys_sendmmsg(fd, mmsg, vlen, flags);
+	return __sys_sendmmsg(fd, (struct mmsghdr __user *)mmsg, vlen,
+			      flags | MSG_CMSG_COMPAT);
 }
 
-static inline long __compat_sys_recvmsg(int fd,
-					struct compat_msghdr __user *msg,
-					unsigned int flags)
+COMPAT_SYSCALL_DEFINE3(recvmsg, int, fd, struct compat_msghdr __user *, msg, unsigned int, flags)
 {
-	return __sys_recvmsg(fd, (struct user_msghdr __user *)msg,
-			     flags | MSG_CMSG_COMPAT, false);
-}
-
-COMPAT_SYSCALL_DEFINE3(recvmsg, int, fd, struct compat_msghdr __user *, msg,
-		       unsigned int, flags)
-{
-	return __compat_sys_recvmsg(fd, msg, flags);
-}
-
-static inline long __compat_sys_recvfrom(int fd, void __user *buf,
-					 compat_size_t len, unsigned int flags,
-					 struct sockaddr __user *addr,
-					 int __user *addrlen)
-{
-	return __sys_recvfrom(fd, buf, len, flags | MSG_CMSG_COMPAT, addr,
-			      addrlen);
+	return __sys_recvmsg(fd, (struct user_msghdr __user *)msg, flags | MSG_CMSG_COMPAT);
 }
 
 COMPAT_SYSCALL_DEFINE4(recv, int, fd, void __user *, buf, compat_size_t, len, unsigned int, flags)
 {
-	return __compat_sys_recvfrom(fd, buf, len, flags, NULL, NULL);
+	return sys_recv(fd, buf, len, flags | MSG_CMSG_COMPAT);
 }
 
 COMPAT_SYSCALL_DEFINE6(recvfrom, int, fd, void __user *, buf, compat_size_t, len,
 		       unsigned int, flags, struct sockaddr __user *, addr,
 		       int __user *, addrlen)
 {
-	return __compat_sys_recvfrom(fd, buf, len, flags, addr, addrlen);
+	return sys_recvfrom(fd, buf, len, flags | MSG_CMSG_COMPAT, addr, addrlen);
 }
 
-static int __compat_sys_recvmmsg(int fd, struct compat_mmsghdr __user *mmsg,
-				 unsigned int vlen, unsigned int flags,
-				 struct compat_timespec __user *timeout)
+COMPAT_SYSCALL_DEFINE5(recvmmsg, int, fd, struct compat_mmsghdr __user *, mmsg,
+		       unsigned int, vlen, unsigned int, flags,
+		       struct compat_timespec __user *, timeout)
 {
 	int datagrams;
 	struct timespec ktspec;
@@ -833,13 +785,6 @@ static int __compat_sys_recvmmsg(int fd, struct compat_mmsghdr __user *mmsg,
 		datagrams = -EFAULT;
 
 	return datagrams;
-}
-
-COMPAT_SYSCALL_DEFINE5(recvmmsg, int, fd, struct compat_mmsghdr __user *, mmsg,
-		       unsigned int, vlen, unsigned int, flags,
-		       struct compat_timespec __user *, timeout)
-{
-	return __compat_sys_recvmmsg(fd, mmsg, vlen, flags, timeout);
 }
 
 COMPAT_SYSCALL_DEFINE2(socketcall, int, call, u32 __user *, args)
@@ -867,72 +812,68 @@ COMPAT_SYSCALL_DEFINE2(socketcall, int, call, u32 __user *, args)
 
 	switch (call) {
 	case SYS_SOCKET:
-		ret = __sys_socket(a0, a1, a[2]);
+		ret = sys_socket(a0, a1, a[2]);
 		break;
 	case SYS_BIND:
-		ret = __sys_bind(a0, compat_ptr(a1), a[2]);
+		ret = sys_bind(a0, compat_ptr(a1), a[2]);
 		break;
 	case SYS_CONNECT:
-		ret = __sys_connect(a0, compat_ptr(a1), a[2]);
+		ret = sys_connect(a0, compat_ptr(a1), a[2]);
 		break;
 	case SYS_LISTEN:
-		ret = __sys_listen(a0, a1);
+		ret = sys_listen(a0, a1);
 		break;
 	case SYS_ACCEPT:
-		ret = __sys_accept4(a0, compat_ptr(a1), compat_ptr(a[2]), 0);
+		ret = sys_accept4(a0, compat_ptr(a1), compat_ptr(a[2]), 0);
 		break;
 	case SYS_GETSOCKNAME:
-		ret = __sys_getsockname(a0, compat_ptr(a1), compat_ptr(a[2]));
+		ret = sys_getsockname(a0, compat_ptr(a1), compat_ptr(a[2]));
 		break;
 	case SYS_GETPEERNAME:
-		ret = __sys_getpeername(a0, compat_ptr(a1), compat_ptr(a[2]));
+		ret = sys_getpeername(a0, compat_ptr(a1), compat_ptr(a[2]));
 		break;
 	case SYS_SOCKETPAIR:
-		ret = __sys_socketpair(a0, a1, a[2], compat_ptr(a[3]));
+		ret = sys_socketpair(a0, a1, a[2], compat_ptr(a[3]));
 		break;
 	case SYS_SEND:
-		ret = __sys_sendto(a0, compat_ptr(a1), a[2], a[3], NULL, 0);
+		ret = sys_send(a0, compat_ptr(a1), a[2], a[3]);
 		break;
 	case SYS_SENDTO:
-		ret = __sys_sendto(a0, compat_ptr(a1), a[2], a[3],
-				   compat_ptr(a[4]), a[5]);
+		ret = sys_sendto(a0, compat_ptr(a1), a[2], a[3], compat_ptr(a[4]), a[5]);
 		break;
 	case SYS_RECV:
-		ret = __compat_sys_recvfrom(a0, compat_ptr(a1), a[2], a[3],
-					    NULL, NULL);
+		ret = compat_sys_recv(a0, compat_ptr(a1), a[2], a[3]);
 		break;
 	case SYS_RECVFROM:
-		ret = __compat_sys_recvfrom(a0, compat_ptr(a1), a[2], a[3],
-					    compat_ptr(a[4]),
-					    compat_ptr(a[5]));
+		ret = compat_sys_recvfrom(a0, compat_ptr(a1), a[2], a[3],
+					  compat_ptr(a[4]), compat_ptr(a[5]));
 		break;
 	case SYS_SHUTDOWN:
-		ret = __sys_shutdown(a0, a1);
+		ret = sys_shutdown(a0, a1);
 		break;
 	case SYS_SETSOCKOPT:
-		ret = __compat_sys_setsockopt(a0, a1, a[2],
-					      compat_ptr(a[3]), a[4]);
+		ret = compat_sys_setsockopt(a0, a1, a[2],
+				compat_ptr(a[3]), a[4]);
 		break;
 	case SYS_GETSOCKOPT:
-		ret = __compat_sys_getsockopt(a0, a1, a[2],
-					      compat_ptr(a[3]),
-					      compat_ptr(a[4]));
+		ret = compat_sys_getsockopt(a0, a1, a[2],
+				compat_ptr(a[3]), compat_ptr(a[4]));
 		break;
 	case SYS_SENDMSG:
-		ret = __compat_sys_sendmsg(a0, compat_ptr(a1), a[2]);
+		ret = compat_sys_sendmsg(a0, compat_ptr(a1), a[2]);
 		break;
 	case SYS_SENDMMSG:
-		ret = __compat_sys_sendmmsg(a0, compat_ptr(a1), a[2], a[3]);
+		ret = compat_sys_sendmmsg(a0, compat_ptr(a1), a[2], a[3]);
 		break;
 	case SYS_RECVMSG:
-		ret = __compat_sys_recvmsg(a0, compat_ptr(a1), a[2]);
+		ret = compat_sys_recvmsg(a0, compat_ptr(a1), a[2]);
 		break;
 	case SYS_RECVMMSG:
-		ret = __compat_sys_recvmmsg(a0, compat_ptr(a1), a[2], a[3],
-					    compat_ptr(a[4]));
+		ret = compat_sys_recvmmsg(a0, compat_ptr(a1), a[2], a[3],
+					  compat_ptr(a[4]));
 		break;
 	case SYS_ACCEPT4:
-		ret = __sys_accept4(a0, compat_ptr(a1), compat_ptr(a[2]), a[3]);
+		ret = sys_accept4(a0, compat_ptr(a1), compat_ptr(a[2]), a[3]);
 		break;
 	default:
 		ret = -EINVAL;

@@ -223,12 +223,13 @@ static const struct v4l2_subdev_ops adv748x_csi2_ops = {
 
 int adv748x_csi2_set_pixelrate(struct v4l2_subdev *sd, s64 rate)
 {
-	struct adv748x_csi2 *tx = adv748x_sd_to_csi2(sd);
+	struct v4l2_ctrl *ctrl;
 
-	if (!tx->pixel_rate)
+	ctrl = v4l2_ctrl_find(sd->ctrl_handler, V4L2_CID_PIXEL_RATE);
+	if (!ctrl)
 		return -EINVAL;
 
-	return v4l2_ctrl_s_ctrl_int64(tx->pixel_rate, rate);
+	return v4l2_ctrl_s_ctrl_int64(ctrl, rate);
 }
 
 static int adv748x_csi2_s_ctrl(struct v4l2_ctrl *ctrl)
@@ -250,10 +251,8 @@ static int adv748x_csi2_init_controls(struct adv748x_csi2 *tx)
 
 	v4l2_ctrl_handler_init(&tx->ctrl_hdl, 1);
 
-	tx->pixel_rate = v4l2_ctrl_new_std(&tx->ctrl_hdl,
-					   &adv748x_csi2_ctrl_ops,
-					   V4L2_CID_PIXEL_RATE, 1, INT_MAX,
-					   1, 1);
+	v4l2_ctrl_new_std(&tx->ctrl_hdl, &adv748x_csi2_ctrl_ops,
+			  V4L2_CID_PIXEL_RATE, 1, INT_MAX, 1, 1);
 
 	tx->sd.ctrl_handler = &tx->ctrl_hdl;
 	if (tx->ctrl_hdl.error) {
@@ -284,7 +283,7 @@ int adv748x_csi2_init(struct adv748x_state *state, struct adv748x_csi2 *tx)
 	adv748x_csi2_set_virtual_channel(tx, 0);
 
 	adv748x_subdev_init(&tx->sd, state, &adv748x_csi2_ops,
-			    MEDIA_ENT_F_VID_IF_BRIDGE,
+			    MEDIA_ENT_F_UNKNOWN,
 			    is_txa(tx) ? "txa" : "txb");
 
 	/* Ensure that matching is based upon the endpoint fwnodes */

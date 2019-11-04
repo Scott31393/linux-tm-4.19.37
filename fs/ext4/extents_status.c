@@ -162,7 +162,8 @@ int __init ext4_init_es(void)
 
 void ext4_exit_es(void)
 {
-	kmem_cache_destroy(ext4_es_cachep);
+	if (ext4_es_cachep)
+		kmem_cache_destroy(ext4_es_cachep);
 }
 
 void ext4_es_init_tree(struct ext4_es_tree *tree)

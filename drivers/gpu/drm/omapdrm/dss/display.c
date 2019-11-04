@@ -1,6 +1,8 @@
 /*
+ * linux/drivers/video/omap2/dss/display.c
+ *
  * Copyright (C) 2009 Nokia Corporation
- * Author: Tomi Valkeinen <tomi.valkeinen@ti.com>
+ * Author: Tomi Valkeinen <tomi.valkeinen@nokia.com>
  *
  * Some code and ideas taken from drivers/video/omap/ driver
  * by Imre Deak.
@@ -28,11 +30,12 @@
 
 #include "omapdss.h"
 
-static void omapdss_default_get_timings(struct omap_dss_device *dssdev,
-					struct videomode *vm)
+void omapdss_default_get_timings(struct omap_dss_device *dssdev,
+				 struct videomode *vm)
 {
 	*vm = dssdev->panel.vm;
 }
+EXPORT_SYMBOL(omapdss_default_get_timings);
 
 static LIST_HEAD(panel_list);
 static DEFINE_MUTEX(panel_list_mutex);
@@ -172,3 +175,17 @@ out:
 	return dssdev;
 }
 EXPORT_SYMBOL(omap_dss_get_next_device);
+
+struct omap_dss_device *omap_dss_find_device(void *data,
+		int (*match)(struct omap_dss_device *dssdev, void *data))
+{
+	struct omap_dss_device *dssdev = NULL;
+
+	while ((dssdev = omap_dss_get_next_device(dssdev)) != NULL) {
+		if (match(dssdev, data))
+			return dssdev;
+	}
+
+	return NULL;
+}
+EXPORT_SYMBOL(omap_dss_find_device);

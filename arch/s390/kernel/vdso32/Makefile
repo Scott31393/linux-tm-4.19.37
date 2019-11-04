@@ -10,9 +10,6 @@ obj-vdso32 = gettimeofday.o clock_getres.o clock_gettime.o note.o getcpu.o
 targets := $(obj-vdso32) vdso32.so vdso32.so.dbg
 obj-vdso32 := $(addprefix $(obj)/, $(obj-vdso32))
 
-KBUILD_AFLAGS += -DBUILD_VDSO
-KBUILD_CFLAGS += -DBUILD_VDSO
-
 KBUILD_AFLAGS_31 := $(filter-out -m64,$(KBUILD_AFLAGS))
 KBUILD_AFLAGS_31 += -m31 -s
 
@@ -36,7 +33,7 @@ UBSAN_SANITIZE := n
 $(obj)/vdso32_wrapper.o : $(obj)/vdso32.so
 
 # link rule for the .so file, .lds has to be first
-$(obj)/vdso32.so.dbg: $(src)/vdso32.lds $(obj-vdso32) FORCE
+$(obj)/vdso32.so.dbg: $(src)/vdso32.lds $(obj-vdso32)
 	$(call if_changed,vdso32ld)
 
 # strip rule for the .so file
@@ -45,12 +42,12 @@ $(obj)/%.so: $(obj)/%.so.dbg FORCE
 	$(call if_changed,objcopy)
 
 # assembly rules for the .S files
-$(obj-vdso32): %.o: %.S FORCE
+$(obj-vdso32): %.o: %.S
 	$(call if_changed_dep,vdso32as)
 
 # actual build commands
 quiet_cmd_vdso32ld = VDSO32L $@
-      cmd_vdso32ld = $(CC) $(c_flags) -Wl,-T $(filter %.lds %.o,$^) -o $@
+      cmd_vdso32ld = $(CC) $(c_flags) -Wl,-T $^ -o $@
 quiet_cmd_vdso32as = VDSO32A $@
       cmd_vdso32as = $(CC) $(a_flags) -c -o $@ $<
 

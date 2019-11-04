@@ -39,43 +39,10 @@
 #include <linux/export.h>
 #include <linux/vmalloc.h>
 #include <linux/hugetlb.h>
-#include <linux/interval_tree_generic.h>
 
 #include <rdma/ib_verbs.h>
 #include <rdma/ib_umem.h>
 #include <rdma/ib_umem_odp.h>
-
-/*
- * The ib_umem list keeps track of memory regions for which the HW
- * device request to receive notification when the related memory
- * mapping is changed.
- *
- * ib_umem_lock protects the list.
- */
-
-static u64 node_start(struct umem_odp_node *n)
-{
-	struct ib_umem_odp *umem_odp =
-			container_of(n, struct ib_umem_odp, interval_tree);
-
-	return ib_umem_start(umem_odp->umem);
-}
-
-/* Note that the representation of the intervals in the interval tree
- * considers the ending point as contained in the interval, while the
- * function ib_umem_end returns the first address which is not contained
- * in the umem.
- */
-static u64 node_last(struct umem_odp_node *n)
-{
-	struct ib_umem_odp *umem_odp =
-			container_of(n, struct ib_umem_odp, interval_tree);
-
-	return ib_umem_end(umem_odp->umem) - 1;
-}
-
-INTERVAL_TREE_DEFINE(struct umem_odp_node, rb, u64, __subtree_last,
-		     node_start, node_last, static, rbt_ib_umem)
 
 static void ib_umem_notifier_start_account(struct ib_umem *item)
 {
@@ -186,7 +153,6 @@ static void ib_umem_notifier_release(struct mmu_notifier *mn,
 	rbt_ib_umem_for_each_in_range(&context->umem_tree, 0,
 				      ULLONG_MAX,
 				      ib_umem_notifier_release_trampoline,
-				      true,
 				      NULL);
 	up_read(&context->umem_rwsem);
 }
@@ -208,31 +174,22 @@ static int invalidate_range_start_trampoline(struct ib_umem *item, u64 start,
 	return 0;
 }
 
-static int ib_umem_notifier_invalidate_range_start(struct mmu_notifier *mn,
+static void ib_umem_notifier_invalidate_range_start(struct mmu_notifier *mn,
 						    struct mm_struct *mm,
 						    unsigned long start,
-						    unsigned long end,
-						    bool blockable)
+						    unsigned long end)
 {
 	struct ib_ucontext *context = container_of(mn, struct ib_ucontext, mn);
-	int ret;
 
 	if (!context->invalidate_range)
-		return 0;
-
-	if (blockable)
-		down_read(&context->umem_rwsem);
-	else if (!down_read_trylock(&context->umem_rwsem))
-		return -EAGAIN;
+		return;
 
 	ib_ucontext_notifier_start_account(context);
-	ret = rbt_ib_umem_for_each_in_range(&context->umem_tree, start,
+	down_read(&context->umem_rwsem);
+	rbt_ib_umem_for_each_in_range(&context->umem_tree, start,
 				      end,
-				      invalidate_range_start_trampoline,
-				      blockable, NULL);
+				      invalidate_range_start_trampoline, NULL);
 	up_read(&context->umem_rwsem);
-
-	return ret;
 }
 
 static int invalidate_range_end_trampoline(struct ib_umem *item, u64 start,
@@ -252,15 +209,10 @@ static void ib_umem_notifier_invalidate_range_end(struct mmu_notifier *mn,
 	if (!context->invalidate_range)
 		return;
 
-	/*
-	 * TODO: we currently bail out if there is any sleepable work to be done
-	 * in ib_umem_notifier_invalidate_range_start so we shouldn't really block
-	 * here. But this is ugly and fragile.
-	 */
 	down_read(&context->umem_rwsem);
 	rbt_ib_umem_for_each_in_range(&context->umem_tree, start,
 				      end,
-				      invalidate_range_end_trampoline, true, NULL);
+				      invalidate_range_end_trampoline, NULL);
 	up_read(&context->umem_rwsem);
 	ib_ucontext_notifier_end_account(context);
 }
@@ -300,15 +252,13 @@ struct ib_umem *ib_alloc_odp_umem(struct ib_ucontext *context,
 	mutex_init(&odp_data->umem_mutex);
 	init_completion(&odp_data->notifier_completion);
 
-	odp_data->page_list =
-		vzalloc(array_size(pages, sizeof(*odp_data->page_list)));
+	odp_data->page_list = vzalloc(pages * sizeof(*odp_data->page_list));
 	if (!odp_data->page_list) {
 		ret = -ENOMEM;
 		goto out_odp_data;
 	}
 
-	odp_data->dma_list =
-		vzalloc(array_size(pages, sizeof(*odp_data->dma_list)));
+	odp_data->dma_list = vzalloc(pages * sizeof(*odp_data->dma_list));
 	if (!odp_data->dma_list) {
 		ret = -ENOMEM;
 		goto out_page_list;
@@ -388,17 +338,15 @@ int ib_umem_odp_get(struct ib_ucontext *context, struct ib_umem *umem,
 	init_completion(&umem->odp_data->notifier_completion);
 
 	if (ib_umem_num_pages(umem)) {
-		umem->odp_data->page_list =
-			vzalloc(array_size(sizeof(*umem->odp_data->page_list),
-					   ib_umem_num_pages(umem)));
+		umem->odp_data->page_list = vzalloc(ib_umem_num_pages(umem) *
+					    sizeof(*umem->odp_data->page_list));
 		if (!umem->odp_data->page_list) {
 			ret_val = -ENOMEM;
 			goto out_odp_data;
 		}
 
-		umem->odp_data->dma_list =
-			vzalloc(array_size(sizeof(*umem->odp_data->dma_list),
-					   ib_umem_num_pages(umem)));
+		umem->odp_data->dma_list = vzalloc(ib_umem_num_pages(umem) *
+					  sizeof(*umem->odp_data->dma_list));
 		if (!umem->odp_data->dma_list) {
 			ret_val = -ENOMEM;
 			goto out_page_list;
@@ -806,46 +754,3 @@ void ib_umem_odp_unmap_dma_pages(struct ib_umem *umem, u64 virt,
 	mutex_unlock(&umem->odp_data->umem_mutex);
 }
 EXPORT_SYMBOL(ib_umem_odp_unmap_dma_pages);
-
-/* @last is not a part of the interval. See comment for function
- * node_last.
- */
-int rbt_ib_umem_for_each_in_range(struct rb_root_cached *root,
-				  u64 start, u64 last,
-				  umem_call_back cb,
-				  bool blockable,
-				  void *cookie)
-{
-	int ret_val = 0;
-	struct umem_odp_node *node, *next;
-	struct ib_umem_odp *umem;
-
-	if (unlikely(start == last))
-		return ret_val;
-
-	for (node = rbt_ib_umem_iter_first(root, start, last - 1);
-			node; node = next) {
-		/* TODO move the blockable decision up to the callback */
-		if (!blockable)
-			return -EAGAIN;
-		next = rbt_ib_umem_iter_next(node, start, last - 1);
-		umem = container_of(node, struct ib_umem_odp, interval_tree);
-		ret_val = cb(umem->umem, start, last, cookie) || ret_val;
-	}
-
-	return ret_val;
-}
-EXPORT_SYMBOL(rbt_ib_umem_for_each_in_range);
-
-struct ib_umem_odp *rbt_ib_umem_lookup(struct rb_root_cached *root,
-				       u64 addr, u64 length)
-{
-	struct umem_odp_node *node;
-
-	node = rbt_ib_umem_iter_first(root, addr, addr + length - 1);
-	if (node)
-		return container_of(node, struct ib_umem_odp, interval_tree);
-	return NULL;
-
-}
-EXPORT_SYMBOL(rbt_ib_umem_lookup);

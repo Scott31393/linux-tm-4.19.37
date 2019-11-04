@@ -19,7 +19,6 @@
  */
 
 #include <linux/dma-mapping.h>
-#include <linux/dma-direct.h>
 #include <linux/bootmem.h>
 #include <linux/genalloc.h>
 #include <asm/dma-mapping.h>
@@ -60,7 +59,7 @@ static void *hexagon_dma_alloc_coherent(struct device *dev, size_t size,
 			panic("Can't create %s() memory pool!", __func__);
 		else
 			gen_pool_add(coherent_pool,
-				(unsigned long)pfn_to_virt(max_low_pfn),
+				pfn_to_virt(max_low_pfn),
 				hexagon_coherent_pool_size, -1);
 	}
 
@@ -208,6 +207,7 @@ const struct dma_map_ops hexagon_dma_ops = {
 	.sync_single_for_cpu = hexagon_sync_single_for_cpu,
 	.sync_single_for_device = hexagon_sync_single_for_device,
 	.mapping_error	= hexagon_mapping_error,
+	.is_phys	= 1,
 };
 
 void __init hexagon_dma_init(void)

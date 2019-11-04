@@ -54,11 +54,9 @@ static bool nft_xt_put(struct nft_xt *xt)
 	return false;
 }
 
-static int nft_compat_chain_validate_dependency(const struct nft_ctx *ctx,
-						const char *tablename)
+static int nft_compat_chain_validate_dependency(const char *tablename,
+						const struct nft_chain *chain)
 {
-	enum nft_chain_types type = NFT_CHAIN_T_DEFAULT;
-	const struct nft_chain *chain = ctx->chain;
 	const struct nft_base_chain *basechain;
 
 	if (!tablename ||
@@ -66,12 +64,9 @@ static int nft_compat_chain_validate_dependency(const struct nft_ctx *ctx,
 		return 0;
 
 	basechain = nft_base_chain(chain);
-	if (strcmp(tablename, "nat") == 0) {
-		if (ctx->family != NFPROTO_BRIDGE)
-			type = NFT_CHAIN_T_NAT;
-		if (basechain->type->type != type)
-			return -EINVAL;
-	}
+	if (strcmp(tablename, "nat") == 0 &&
+	    basechain->type->type != NFT_CHAIN_T_NAT)
+		return -EINVAL;
 
 	return 0;
 }
@@ -166,7 +161,7 @@ nft_target_set_tgchk_param(struct xt_tgchk_param *par,
 {
 	par->net	= ctx->net;
 	par->table	= ctx->table->name;
-	switch (ctx->family) {
+	switch (ctx->afi->family) {
 	case AF_INET:
 		entry->e4.ip.proto = proto;
 		entry->e4.ip.invflags = inv ? IPT_INV_PROTO : 0;
@@ -191,13 +186,13 @@ nft_target_set_tgchk_param(struct xt_tgchk_param *par,
 	if (nft_is_base_chain(ctx->chain)) {
 		const struct nft_base_chain *basechain =
 						nft_base_chain(ctx->chain);
-		const struct nf_hook_ops *ops = &basechain->ops;
+		const struct nf_hook_ops *ops = &basechain->ops[0];
 
 		par->hook_mask = 1 << ops->hooknum;
 	} else {
 		par->hook_mask = 0;
 	}
-	par->family	= ctx->family;
+	par->family	= ctx->afi->family;
 	par->nft_compat = true;
 }
 
@@ -282,18 +277,17 @@ nft_target_destroy(const struct nft_ctx *ctx, const struct nft_expr *expr)
 {
 	struct xt_target *target = expr->ops->data;
 	void *info = nft_expr_priv(expr);
-	struct module *me = target->me;
 	struct xt_tgdtor_param par;
 
 	par.net = ctx->net;
 	par.target = target;
 	par.targinfo = info;
-	par.family = ctx->family;
+	par.family = ctx->afi->family;
 	if (par.target->destroy != NULL)
 		par.target->destroy(&par);
 
 	if (nft_xt_put(container_of(expr->ops, struct nft_xt, ops)))
-		module_put(me);
+		module_put(target->me);
 }
 
 static int nft_target_dump(struct sk_buff *skb, const struct nft_expr *expr)
@@ -323,13 +317,14 @@ static int nft_target_validate(const struct nft_ctx *ctx,
 	if (nft_is_base_chain(ctx->chain)) {
 		const struct nft_base_chain *basechain =
 						nft_base_chain(ctx->chain);
-		const struct nf_hook_ops *ops = &basechain->ops;
+		const struct nf_hook_ops *ops = &basechain->ops[0];
 
 		hook_mask = 1 << ops->hooknum;
 		if (target->hooks && !(hook_mask & target->hooks))
 			return -EINVAL;
 
-		ret = nft_compat_chain_validate_dependency(ctx, target->table);
+		ret = nft_compat_chain_validate_dependency(target->table,
+							   ctx->chain);
 		if (ret < 0)
 			return ret;
 	}
@@ -394,7 +389,7 @@ nft_match_set_mtchk_param(struct xt_mtchk_param *par, const struct nft_ctx *ctx,
 {
 	par->net	= ctx->net;
 	par->table	= ctx->table->name;
-	switch (ctx->family) {
+	switch (ctx->afi->family) {
 	case AF_INET:
 		entry->e4.ip.proto = proto;
 		entry->e4.ip.invflags = inv ? IPT_INV_PROTO : 0;
@@ -419,13 +414,13 @@ nft_match_set_mtchk_param(struct xt_mtchk_param *par, const struct nft_ctx *ctx,
 	if (nft_is_base_chain(ctx->chain)) {
 		const struct nft_base_chain *basechain =
 						nft_base_chain(ctx->chain);
-		const struct nf_hook_ops *ops = &basechain->ops;
+		const struct nf_hook_ops *ops = &basechain->ops[0];
 
 		par->hook_mask = 1 << ops->hooknum;
 	} else {
 		par->hook_mask = 0;
 	}
-	par->family	= ctx->family;
+	par->family	= ctx->afi->family;
 	par->nft_compat = true;
 }
 
@@ -502,18 +497,17 @@ __nft_match_destroy(const struct nft_ctx *ctx, const struct nft_expr *expr,
 		    void *info)
 {
 	struct xt_match *match = expr->ops->data;
-	struct module *me = match->me;
 	struct xt_mtdtor_param par;
 
 	par.net = ctx->net;
 	par.match = match;
 	par.matchinfo = info;
-	par.family = ctx->family;
+	par.family = ctx->afi->family;
 	if (par.match->destroy != NULL)
 		par.match->destroy(&par);
 
 	if (nft_xt_put(container_of(expr->ops, struct nft_xt, ops)))
-		module_put(me);
+		module_put(match->me);
 }
 
 static void
@@ -570,13 +564,14 @@ static int nft_match_validate(const struct nft_ctx *ctx,
 	if (nft_is_base_chain(ctx->chain)) {
 		const struct nft_base_chain *basechain =
 						nft_base_chain(ctx->chain);
-		const struct nf_hook_ops *ops = &basechain->ops;
+		const struct nf_hook_ops *ops = &basechain->ops[0];
 
 		hook_mask = 1 << ops->hooknum;
 		if (match->hooks && !(hook_mask & match->hooks))
 			return -EINVAL;
 
-		ret = nft_compat_chain_validate_dependency(ctx, match->table);
+		ret = nft_compat_chain_validate_dependency(match->table,
+							   ctx->chain);
 		if (ret < 0)
 			return ret;
 	}
@@ -616,10 +611,10 @@ nla_put_failure:
 	return -1;
 }
 
-static int nfnl_compat_get_rcu(struct net *net, struct sock *nfnl,
-			       struct sk_buff *skb, const struct nlmsghdr *nlh,
-			       const struct nlattr * const tb[],
-			       struct netlink_ext_ack *extack)
+static int nfnl_compat_get(struct net *net, struct sock *nfnl,
+			   struct sk_buff *skb, const struct nlmsghdr *nlh,
+			   const struct nlattr * const tb[],
+			   struct netlink_ext_ack *extack)
 {
 	int ret = 0, target;
 	struct nfgenmsg *nfmsg;
@@ -658,21 +653,16 @@ static int nfnl_compat_get_rcu(struct net *net, struct sock *nfnl,
 		return -EINVAL;
 	}
 
-	if (!try_module_get(THIS_MODULE))
-		return -EINVAL;
-
-	rcu_read_unlock();
 	try_then_request_module(xt_find_revision(nfmsg->nfgen_family, name,
 						 rev, target, &ret),
 						 fmt, name);
+
 	if (ret < 0)
-		goto out_put;
+		return ret;
 
 	skb2 = nlmsg_new(NLMSG_DEFAULT_SIZE, GFP_KERNEL);
-	if (skb2 == NULL) {
-		ret = -ENOMEM;
-		goto out_put;
-	}
+	if (skb2 == NULL)
+		return -ENOMEM;
 
 	/* include the best revision for this extension in the message */
 	if (nfnl_compat_fill_info(skb2, NETLINK_CB(skb).portid,
@@ -682,16 +672,14 @@ static int nfnl_compat_get_rcu(struct net *net, struct sock *nfnl,
 				  nfmsg->nfgen_family,
 				  name, ret, target) <= 0) {
 		kfree_skb(skb2);
-		goto out_put;
+		return -ENOSPC;
 	}
 
 	ret = netlink_unicast(nfnl, skb2, NETLINK_CB(skb).portid,
 				MSG_DONTWAIT);
 	if (ret > 0)
 		ret = 0;
-out_put:
-	rcu_read_lock();
-	module_put(THIS_MODULE);
+
 	return ret == -EAGAIN ? -ENOBUFS : ret;
 }
 
@@ -703,7 +691,7 @@ static const struct nla_policy nfnl_compat_policy_get[NFTA_COMPAT_MAX+1] = {
 };
 
 static const struct nfnl_callback nfnl_nft_compat_cb[NFNL_MSG_COMPAT_MAX] = {
-	[NFNL_MSG_COMPAT_GET]		= { .call_rcu = nfnl_compat_get_rcu,
+	[NFNL_MSG_COMPAT_GET]		= { .call = nfnl_compat_get,
 					    .attr_count = NFTA_COMPAT_MAX,
 					    .policy = nfnl_compat_policy_get },
 };
@@ -744,7 +732,7 @@ nft_match_select_ops(const struct nft_ctx *ctx,
 
 	mt_name = nla_data(tb[NFTA_MATCH_NAME]);
 	rev = ntohl(nla_get_be32(tb[NFTA_MATCH_REV]));
-	family = ctx->family;
+	family = ctx->afi->family;
 
 	/* Re-use the existing match if it's already loaded. */
 	list_for_each_entry(nft_match, &nft_match_list, head) {
@@ -835,19 +823,11 @@ nft_target_select_ops(const struct nft_ctx *ctx,
 
 	tg_name = nla_data(tb[NFTA_TARGET_NAME]);
 	rev = ntohl(nla_get_be32(tb[NFTA_TARGET_REV]));
-	family = ctx->family;
-
-	if (strcmp(tg_name, XT_ERROR_TARGET) == 0 ||
-	    strcmp(tg_name, XT_STANDARD_TARGET) == 0 ||
-	    strcmp(tg_name, "standard") == 0)
-		return ERR_PTR(-EINVAL);
+	family = ctx->afi->family;
 
 	/* Re-use the existing target if it's already loaded. */
 	list_for_each_entry(nft_target, &nft_target_list, head) {
 		struct xt_target *target = nft_target->ops.data;
-
-		if (!target->target)
-			continue;
 
 		if (nft_target_cmp(target, tg_name, rev, family))
 			return &nft_target->ops;
@@ -856,11 +836,6 @@ nft_target_select_ops(const struct nft_ctx *ctx,
 	target = xt_request_find_target(family, tg_name, rev);
 	if (IS_ERR(target))
 		return ERR_PTR(-ENOENT);
-
-	if (!target->target) {
-		err = -EINVAL;
-		goto err;
-	}
 
 	if (target->targetsize > nla_len(tb[NFTA_TARGET_INFO])) {
 		err = -EINVAL;
@@ -921,6 +896,8 @@ static int __init nft_compat_module_init(void)
 		pr_err("nft_compat: cannot register with nfnetlink.\n");
 		goto err_target;
 	}
+
+	pr_info("nf_tables_compat: (c) 2012 Pablo Neira Ayuso <pablo@netfilter.org>\n");
 
 	return ret;
 

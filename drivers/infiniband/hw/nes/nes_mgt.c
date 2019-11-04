@@ -122,10 +122,9 @@ static void nes_replenish_mgt_rq(struct nes_vnic_mgt *mgtvnic)
 /**
  * nes_mgt_rq_wqes_timeout
  */
-static void nes_mgt_rq_wqes_timeout(struct timer_list *t)
+static void nes_mgt_rq_wqes_timeout(unsigned long parm)
 {
-	struct nes_vnic_mgt *mgtvnic = from_timer(mgtvnic, t,
-						       rq_wqes_timer);
+	struct nes_vnic_mgt *mgtvnic = (struct nes_vnic_mgt *)parm;
 
 	atomic_set(&mgtvnic->rx_skb_timer_running, 0);
 	if (atomic_read(&mgtvnic->rx_skbs_needed))
@@ -878,8 +877,7 @@ int nes_init_mgt_qp(struct nes_device *nesdev, struct net_device *netdev, struct
 	int ret;
 
 	/* Allocate space the all mgt QPs once */
-	mgtvnic = kcalloc(NES_MGT_QP_COUNT, sizeof(struct nes_vnic_mgt),
-			  GFP_KERNEL);
+	mgtvnic = kzalloc(NES_MGT_QP_COUNT * sizeof(struct nes_vnic_mgt), GFP_KERNEL);
 	if (!mgtvnic)
 		return -ENOMEM;
 
@@ -1042,8 +1040,8 @@ int nes_init_mgt_qp(struct nes_device *nesdev, struct net_device *netdev, struct
 			mgtvnic->mgt.rx_skb[counter] = skb;
 		}
 
-		timer_setup(&mgtvnic->rq_wqes_timer, nes_mgt_rq_wqes_timeout,
-			    0);
+		setup_timer(&mgtvnic->rq_wqes_timer, nes_mgt_rq_wqes_timeout,
+			    (unsigned long)mgtvnic);
 
 		wqe_count = NES_MGT_WQ_COUNT - 1;
 		mgtvnic->mgt.rq_head = wqe_count;

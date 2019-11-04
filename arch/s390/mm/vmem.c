@@ -60,7 +60,7 @@ pte_t __ref *vmem_pte_alloc(void)
 		pte = (pte_t *) memblock_alloc(size, size);
 	if (!pte)
 		return NULL;
-	memset64((u64 *)pte, _PAGE_INVALID, PTRS_PER_PTE);
+	clear_table((unsigned long *) pte, _PAGE_INVALID, size);
 	return pte;
 }
 
@@ -211,8 +211,7 @@ static void vmem_remove_range(unsigned long start, unsigned long size)
 /*
  * Add a backed mem_map array to the virtual mem_map array.
  */
-int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node,
-		struct vmem_altmap *altmap)
+int __meminit vmemmap_populate(unsigned long start, unsigned long end, int node)
 {
 	unsigned long pgt_prot, sgt_prot;
 	unsigned long address = start;
@@ -297,8 +296,7 @@ out:
 	return ret;
 }
 
-void vmemmap_free(unsigned long start, unsigned long end,
-		struct vmem_altmap *altmap)
+void vmemmap_free(unsigned long start, unsigned long end)
 {
 }
 
@@ -405,17 +403,17 @@ void __init vmem_map_init(void)
 
 	for_each_memblock(memory, reg)
 		vmem_add_mem(reg->base, reg->size);
-	__set_memory((unsigned long)_stext,
-		     (unsigned long)(_etext - _stext) >> PAGE_SHIFT,
+	__set_memory((unsigned long) _stext,
+		     (_etext - _stext) >> PAGE_SHIFT,
 		     SET_MEMORY_RO | SET_MEMORY_X);
-	__set_memory((unsigned long)_etext,
-		     (unsigned long)(__end_rodata - _etext) >> PAGE_SHIFT,
+	__set_memory((unsigned long) _etext,
+		     (_eshared - _etext) >> PAGE_SHIFT,
 		     SET_MEMORY_RO);
-	__set_memory((unsigned long)_sinittext,
-		     (unsigned long)(_einittext - _sinittext) >> PAGE_SHIFT,
+	__set_memory((unsigned long) _sinittext,
+		     (_einittext - _sinittext) >> PAGE_SHIFT,
 		     SET_MEMORY_RO | SET_MEMORY_X);
 	pr_info("Write protected kernel read-only data: %luk\n",
-		(unsigned long)(__end_rodata - _stext) >> 10);
+		(_eshared - _stext) >> 10);
 }
 
 /*

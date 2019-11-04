@@ -1,9 +1,12 @@
-// SPDX-License-Identifier: GPL-2.0
-//
-// Renesas R-Car SSIU support
-//
-// Copyright (c) 2015 Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
-
+/*
+ * Renesas R-Car SSIU support
+ *
+ * Copyright (c) 2015 Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
 #include "rsnd.h"
 
 #define SSIU_NAME "ssiu"
@@ -122,7 +125,6 @@ static int rsnd_ssiu_init_gen2(struct rsnd_mod *mod,
 {
 	int hdmi = rsnd_ssi_hdmi_port(io);
 	int ret;
-	u32 mode = 0;
 
 	ret = rsnd_ssiu_init(mod, io, priv);
 	if (ret < 0)
@@ -134,10 +136,8 @@ static int rsnd_ssiu_init_gen2(struct rsnd_mod *mod,
 		 * see
 		 *	rsnd_ssi_config_init()
 		 */
-		mode = 0x1;
+		rsnd_mod_write(mod, SSI_MODE, 0x1);
 	}
-
-	rsnd_mod_write(mod, SSI_MODE, mode);
 
 	if (rsnd_ssi_use_busif(io)) {
 		rsnd_mod_write(mod, SSI_BUSIF_ADINR,
@@ -255,7 +255,7 @@ int rsnd_ssiu_probe(struct rsnd_priv *priv)
 
 	/* same number to SSI */
 	nr	= priv->ssi_nr;
-	ssiu	= devm_kcalloc(dev, nr, sizeof(*ssiu), GFP_KERNEL);
+	ssiu	= devm_kzalloc(dev, sizeof(*ssiu) * nr, GFP_KERNEL);
 	if (!ssiu)
 		return -ENOMEM;
 

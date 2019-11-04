@@ -1,17 +1,22 @@
-// SPDX-License-Identifier: GPL-2.0+
-//
-// Exynos specific support for Samsung pinctrl/gpiolib driver with eint support.
-//
-// Copyright (c) 2012 Samsung Electronics Co., Ltd.
-//		http://www.samsung.com
-// Copyright (c) 2012 Linaro Ltd
-//		http://www.linaro.org
-//
-// Author: Thomas Abraham <thomas.ab@samsung.com>
-//
-// This file contains the Samsung Exynos specific information required by the
-// the Samsung pinctrl/gpiolib driver. It also includes the implementation of
-// external gpio and wakeup interrupt support.
+/*
+ * Exynos specific support for Samsung pinctrl/gpiolib driver with eint support.
+ *
+ * Copyright (c) 2012 Samsung Electronics Co., Ltd.
+ *		http://www.samsung.com
+ * Copyright (c) 2012 Linaro Ltd
+ *		http://www.linaro.org
+ *
+ * Author: Thomas Abraham <thomas.ab@samsung.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This file contains the Samsung Exynos specific information required by the
+ * the Samsung pinctrl/gpiolib driver. It also includes the implementation of
+ * external gpio and wakeup interrupt support.
+ */
 
 #include <linux/device.h>
 #include <linux/of_address.h>
@@ -88,7 +93,6 @@ static const struct samsung_retention_data s5pv210_retention_data __initconst = 
 
 /* pin banks of s5pv210 pin-controller */
 static const struct samsung_pin_bank_data s5pv210_pin_bank[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpa0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(4, 0x020, "gpa1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpb", 0x08),
@@ -148,7 +152,6 @@ static atomic_t exynos_shared_retention_refcnt;
 
 /* pin banks of exynos3250 pin-controller 0 */
 static const struct samsung_pin_bank_data exynos3250_pin_banks0[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpa0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(6, 0x020, "gpa1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpb",  0x08),
@@ -160,7 +163,6 @@ static const struct samsung_pin_bank_data exynos3250_pin_banks0[] __initconst = 
 
 /* pin banks of exynos3250 pin-controller 1 */
 static const struct samsung_pin_bank_data exynos3250_pin_banks1[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTN(8, 0x120, "gpe0"),
 	EXYNOS_PIN_BANK_EINTN(8, 0x140, "gpe1"),
 	EXYNOS_PIN_BANK_EINTN(3, 0x180, "gpe2"),
@@ -235,7 +237,6 @@ const struct samsung_pinctrl_of_match_data exynos3250_of_data __initconst = {
 
 /* pin banks of exynos4210 pin-controller 0 */
 static const struct samsung_pin_bank_data exynos4210_pin_banks0[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpa0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(6, 0x020, "gpa1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpb", 0x08),
@@ -256,7 +257,6 @@ static const struct samsung_pin_bank_data exynos4210_pin_banks0[] __initconst = 
 
 /* pin banks of exynos4210 pin-controller 1 */
 static const struct samsung_pin_bank_data exynos4210_pin_banks1[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpj0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(5, 0x020, "gpj1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(7, 0x040, "gpk0", 0x08),
@@ -281,7 +281,6 @@ static const struct samsung_pin_bank_data exynos4210_pin_banks1[] __initconst = 
 
 /* pin banks of exynos4210 pin-controller 2 */
 static const struct samsung_pin_bank_data exynos4210_pin_banks2[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTN(7, 0x000, "gpz"),
 };
 
@@ -352,7 +351,6 @@ const struct samsung_pinctrl_of_match_data exynos4210_of_data __initconst = {
 
 /* pin banks of exynos4x12 pin-controller 0 */
 static const struct samsung_pin_bank_data exynos4x12_pin_banks0[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpa0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(6, 0x020, "gpa1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpb", 0x08),
@@ -370,7 +368,6 @@ static const struct samsung_pin_bank_data exynos4x12_pin_banks0[] __initconst = 
 
 /* pin banks of exynos4x12 pin-controller 1 */
 static const struct samsung_pin_bank_data exynos4x12_pin_banks1[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(7, 0x040, "gpk0", 0x08),
 	EXYNOS_PIN_BANK_EINTG(7, 0x060, "gpk1", 0x0c),
 	EXYNOS_PIN_BANK_EINTG(7, 0x080, "gpk2", 0x10),
@@ -398,13 +395,11 @@ static const struct samsung_pin_bank_data exynos4x12_pin_banks1[] __initconst = 
 
 /* pin banks of exynos4x12 pin-controller 2 */
 static const struct samsung_pin_bank_data exynos4x12_pin_banks2[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(7, 0x000, "gpz", 0x00),
 };
 
 /* pin banks of exynos4x12 pin-controller 3 */
 static const struct samsung_pin_bank_data exynos4x12_pin_banks3[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpv0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(8, 0x020, "gpv1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpv2", 0x08),
@@ -459,7 +454,6 @@ const struct samsung_pinctrl_of_match_data exynos4x12_of_data __initconst = {
 
 /* pin banks of exynos5250 pin-controller 0 */
 static const struct samsung_pin_bank_data exynos5250_pin_banks0[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpa0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(6, 0x020, "gpa1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpa2", 0x08),
@@ -489,7 +483,6 @@ static const struct samsung_pin_bank_data exynos5250_pin_banks0[] __initconst = 
 
 /* pin banks of exynos5250 pin-controller 1 */
 static const struct samsung_pin_bank_data exynos5250_pin_banks1[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpe0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(2, 0x020, "gpe1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(4, 0x040, "gpf0", 0x08),
@@ -503,7 +496,6 @@ static const struct samsung_pin_bank_data exynos5250_pin_banks1[] __initconst = 
 
 /* pin banks of exynos5250 pin-controller 2 */
 static const struct samsung_pin_bank_data exynos5250_pin_banks2[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpv0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(8, 0x020, "gpv1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x060, "gpv2", 0x08),
@@ -513,7 +505,6 @@ static const struct samsung_pin_bank_data exynos5250_pin_banks2[] __initconst = 
 
 /* pin banks of exynos5250 pin-controller 3 */
 static const struct samsung_pin_bank_data exynos5250_pin_banks3[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(7, 0x000, "gpz", 0x00),
 };
 
@@ -564,7 +555,6 @@ const struct samsung_pinctrl_of_match_data exynos5250_of_data __initconst = {
 
 /* pin banks of exynos5260 pin-controller 0 */
 static const struct samsung_pin_bank_data exynos5260_pin_banks0[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(4, 0x000, "gpa0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(7, 0x020, "gpa1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpa2", 0x08),
@@ -590,7 +580,6 @@ static const struct samsung_pin_bank_data exynos5260_pin_banks0[] __initconst = 
 
 /* pin banks of exynos5260 pin-controller 1 */
 static const struct samsung_pin_bank_data exynos5260_pin_banks1[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(7, 0x000, "gpc0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(6, 0x020, "gpc1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(7, 0x040, "gpc2", 0x08),
@@ -600,7 +589,6 @@ static const struct samsung_pin_bank_data exynos5260_pin_banks1[] __initconst = 
 
 /* pin banks of exynos5260 pin-controller 2 */
 static const struct samsung_pin_bank_data exynos5260_pin_banks2[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(7, 0x000, "gpz0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(4, 0x020, "gpz1", 0x04),
 };
@@ -616,22 +604,16 @@ static const struct samsung_pin_ctrl exynos5260_pin_ctrl[] __initconst = {
 		.nr_banks	= ARRAY_SIZE(exynos5260_pin_banks0),
 		.eint_gpio_init = exynos_eint_gpio_init,
 		.eint_wkup_init = exynos_eint_wkup_init,
-		.suspend	= exynos_pinctrl_suspend,
-		.resume		= exynos_pinctrl_resume,
 	}, {
 		/* pin-controller instance 1 data */
 		.pin_banks	= exynos5260_pin_banks1,
 		.nr_banks	= ARRAY_SIZE(exynos5260_pin_banks1),
 		.eint_gpio_init = exynos_eint_gpio_init,
-		.suspend	= exynos_pinctrl_suspend,
-		.resume		= exynos_pinctrl_resume,
 	}, {
 		/* pin-controller instance 2 data */
 		.pin_banks	= exynos5260_pin_banks2,
 		.nr_banks	= ARRAY_SIZE(exynos5260_pin_banks2),
 		.eint_gpio_init = exynos_eint_gpio_init,
-		.suspend	= exynos_pinctrl_suspend,
-		.resume		= exynos_pinctrl_resume,
 	},
 };
 
@@ -642,7 +624,6 @@ const struct samsung_pinctrl_of_match_data exynos5260_of_data __initconst = {
 
 /* pin banks of exynos5410 pin-controller 0 */
 static const struct samsung_pin_bank_data exynos5410_pin_banks0[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpa0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(6, 0x020, "gpa1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpa2", 0x08),
@@ -682,7 +663,6 @@ static const struct samsung_pin_bank_data exynos5410_pin_banks0[] __initconst = 
 
 /* pin banks of exynos5410 pin-controller 1 */
 static const struct samsung_pin_bank_data exynos5410_pin_banks1[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(5, 0x000, "gpj0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(8, 0x020, "gpj1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpj2", 0x08),
@@ -696,7 +676,6 @@ static const struct samsung_pin_bank_data exynos5410_pin_banks1[] __initconst = 
 
 /* pin banks of exynos5410 pin-controller 2 */
 static const struct samsung_pin_bank_data exynos5410_pin_banks2[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpv0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(8, 0x020, "gpv1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x060, "gpv2", 0x08),
@@ -706,7 +685,6 @@ static const struct samsung_pin_bank_data exynos5410_pin_banks2[] __initconst = 
 
 /* pin banks of exynos5410 pin-controller 3 */
 static const struct samsung_pin_bank_data exynos5410_pin_banks3[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(7, 0x000, "gpz", 0x00),
 };
 
@@ -754,7 +732,6 @@ const struct samsung_pinctrl_of_match_data exynos5410_of_data __initconst = {
 
 /* pin banks of exynos5420 pin-controller 0 */
 static const struct samsung_pin_bank_data exynos5420_pin_banks0[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpy7", 0x00),
 	EXYNOS_PIN_BANK_EINTW(8, 0xC00, "gpx0", 0x00),
 	EXYNOS_PIN_BANK_EINTW(8, 0xC20, "gpx1", 0x04),
@@ -764,7 +741,6 @@ static const struct samsung_pin_bank_data exynos5420_pin_banks0[] __initconst = 
 
 /* pin banks of exynos5420 pin-controller 1 */
 static const struct samsung_pin_bank_data exynos5420_pin_banks1[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpc0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(8, 0x020, "gpc1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(7, 0x040, "gpc2", 0x08),
@@ -782,7 +758,6 @@ static const struct samsung_pin_bank_data exynos5420_pin_banks1[] __initconst = 
 
 /* pin banks of exynos5420 pin-controller 2 */
 static const struct samsung_pin_bank_data exynos5420_pin_banks2[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpe0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(2, 0x020, "gpe1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(6, 0x040, "gpf0", 0x08),
@@ -795,7 +770,6 @@ static const struct samsung_pin_bank_data exynos5420_pin_banks2[] __initconst = 
 
 /* pin banks of exynos5420 pin-controller 3 */
 static const struct samsung_pin_bank_data exynos5420_pin_banks3[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(8, 0x000, "gpa0", 0x00),
 	EXYNOS_PIN_BANK_EINTG(6, 0x020, "gpa1", 0x04),
 	EXYNOS_PIN_BANK_EINTG(8, 0x040, "gpa2", 0x08),
@@ -809,7 +783,6 @@ static const struct samsung_pin_bank_data exynos5420_pin_banks3[] __initconst = 
 
 /* pin banks of exynos5420 pin-controller 4 */
 static const struct samsung_pin_bank_data exynos5420_pin_banks4[] __initconst = {
-	/* Must start with EINTG banks, ordered by EINT group number. */
 	EXYNOS_PIN_BANK_EINTG(7, 0x000, "gpz", 0x00),
 };
 
@@ -848,40 +821,30 @@ static const struct samsung_pin_ctrl exynos5420_pin_ctrl[] __initconst = {
 		.nr_banks	= ARRAY_SIZE(exynos5420_pin_banks0),
 		.eint_gpio_init = exynos_eint_gpio_init,
 		.eint_wkup_init = exynos_eint_wkup_init,
-		.suspend	= exynos_pinctrl_suspend,
-		.resume		= exynos_pinctrl_resume,
 		.retention_data	= &exynos5420_retention_data,
 	}, {
 		/* pin-controller instance 1 data */
 		.pin_banks	= exynos5420_pin_banks1,
 		.nr_banks	= ARRAY_SIZE(exynos5420_pin_banks1),
 		.eint_gpio_init = exynos_eint_gpio_init,
-		.suspend	= exynos_pinctrl_suspend,
-		.resume		= exynos_pinctrl_resume,
 		.retention_data	= &exynos5420_retention_data,
 	}, {
 		/* pin-controller instance 2 data */
 		.pin_banks	= exynos5420_pin_banks2,
 		.nr_banks	= ARRAY_SIZE(exynos5420_pin_banks2),
 		.eint_gpio_init = exynos_eint_gpio_init,
-		.suspend	= exynos_pinctrl_suspend,
-		.resume		= exynos_pinctrl_resume,
 		.retention_data	= &exynos5420_retention_data,
 	}, {
 		/* pin-controller instance 3 data */
 		.pin_banks	= exynos5420_pin_banks3,
 		.nr_banks	= ARRAY_SIZE(exynos5420_pin_banks3),
 		.eint_gpio_init = exynos_eint_gpio_init,
-		.suspend	= exynos_pinctrl_suspend,
-		.resume		= exynos_pinctrl_resume,
 		.retention_data	= &exynos5420_retention_data,
 	}, {
 		/* pin-controller instance 4 data */
 		.pin_banks	= exynos5420_pin_banks4,
 		.nr_banks	= ARRAY_SIZE(exynos5420_pin_banks4),
 		.eint_gpio_init = exynos_eint_gpio_init,
-		.suspend	= exynos_pinctrl_suspend,
-		.resume		= exynos_pinctrl_resume,
 		.retention_data	= &exynos4_audio_retention_data,
 	},
 };

@@ -25,7 +25,6 @@
 #include <linux/user-return-notifier.h>
 #include <linux/uprobes.h>
 #include <linux/context_tracking.h>
-#include <linux/syscalls.h>
 
 #include <asm/processor.h>
 #include <asm/ucontext.h>
@@ -602,7 +601,7 @@ static int x32_setup_rt_frame(struct ksignal *ksig,
  * Do a signal return; undo the signal stack.
  */
 #ifdef CONFIG_X86_32
-SYSCALL_DEFINE0(sigreturn)
+asmlinkage unsigned long sys_sigreturn(void)
 {
 	struct pt_regs *regs = current_pt_regs();
 	struct sigframe __user *frame;
@@ -634,7 +633,7 @@ badframe:
 }
 #endif /* CONFIG_X86_32 */
 
-SYSCALL_DEFINE0(rt_sigreturn)
+asmlinkage long sys_rt_sigreturn(void)
 {
 	struct pt_regs *regs = current_pt_regs();
 	struct rt_sigframe __user *frame;
@@ -687,12 +686,6 @@ setup_rt_frame(struct ksignal *ksig, struct pt_regs *regs)
 	int usig = ksig->sig;
 	sigset_t *set = sigmask_to_save();
 	compat_sigset_t *cset = (compat_sigset_t *) set;
-
-	/*
-	 * Increment event counter and perform fixup for the pre-signal
-	 * frame.
-	 */
-	rseq_signal_deliver(ksig, regs);
 
 	/* Set up the stack frame */
 	if (is_ia32_frame(ksig)) {

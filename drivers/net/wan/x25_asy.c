@@ -324,7 +324,6 @@ static netdev_tx_t x25_asy_xmit(struct sk_buff *skb,
 		if (err != LAPB_OK)
 			netdev_err(dev, "lapb_disconnect_request error: %d\n",
 				   err);
-		/* fall through */
 	default:
 		kfree_skb(skb);
 		return NETDEV_TX_OK;
@@ -486,10 +485,8 @@ static int x25_asy_open(struct net_device *dev)
 
 	/* Cleanup */
 	kfree(sl->xbuff);
-	sl->xbuff = NULL;
 noxbuff:
 	kfree(sl->rbuff);
-	sl->rbuff = NULL;
 norbuff:
 	return -ENOMEM;
 }

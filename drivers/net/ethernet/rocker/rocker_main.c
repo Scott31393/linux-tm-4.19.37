@@ -1632,9 +1632,6 @@ rocker_world_port_obj_vlan_add(struct rocker_port *rocker_port,
 {
 	struct rocker_world_ops *wops = rocker_port->rocker->wops;
 
-	if (netif_is_bridge_master(vlan->obj.orig_dev))
-		return -EOPNOTSUPP;
-
 	if (!wops->port_obj_vlan_add)
 		return -EOPNOTSUPP;
 
@@ -1649,9 +1646,6 @@ rocker_world_port_obj_vlan_del(struct rocker_port *rocker_port,
 			       const struct switchdev_obj_port_vlan *vlan)
 {
 	struct rocker_world_ops *wops = rocker_port->rocker->wops;
-
-	if (netif_is_bridge_master(vlan->obj.orig_dev))
-		return -EOPNOTSUPP;
 
 	if (!wops->port_obj_vlan_del)
 		return -EOPNOTSUPP;
@@ -2744,8 +2738,6 @@ static void rocker_switchdev_event_work(struct work_struct *work)
 	switch (switchdev_work->event) {
 	case SWITCHDEV_FDB_ADD_TO_DEVICE:
 		fdb_info = &switchdev_work->fdb_info;
-		if (!fdb_info->added_by_user)
-			break;
 		err = rocker_world_port_fdb_add(rocker_port, fdb_info);
 		if (err) {
 			netdev_dbg(rocker_port->dev, "fdb add failed err=%d\n", err);
@@ -2755,8 +2747,6 @@ static void rocker_switchdev_event_work(struct work_struct *work)
 		break;
 	case SWITCHDEV_FDB_DEL_TO_DEVICE:
 		fdb_info = &switchdev_work->fdb_info;
-		if (!fdb_info->added_by_user)
-			break;
 		err = rocker_world_port_fdb_del(rocker_port, fdb_info);
 		if (err)
 			netdev_dbg(rocker_port->dev, "fdb add failed err=%d\n", err);

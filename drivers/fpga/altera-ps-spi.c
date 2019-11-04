@@ -238,8 +238,6 @@ static int altera_ps_probe(struct spi_device *spi)
 {
 	struct altera_ps_conf *conf;
 	const struct of_device_id *of_id;
-	struct fpga_manager *mgr;
-	int ret;
 
 	conf = devm_kzalloc(&spi->dev, sizeof(*conf), GFP_KERNEL);
 	if (!conf)
@@ -275,25 +273,13 @@ static int altera_ps_probe(struct spi_device *spi)
 	snprintf(conf->mgr_name, sizeof(conf->mgr_name), "%s %s",
 		 dev_driver_string(&spi->dev), dev_name(&spi->dev));
 
-	mgr = fpga_mgr_create(&spi->dev, conf->mgr_name,
-			      &altera_ps_ops, conf);
-	if (!mgr)
-		return -ENOMEM;
-
-	spi_set_drvdata(spi, mgr);
-
-	ret = fpga_mgr_register(mgr);
-	if (ret)
-		fpga_mgr_free(mgr);
-
-	return ret;
+	return fpga_mgr_register(&spi->dev, conf->mgr_name,
+				 &altera_ps_ops, conf);
 }
 
 static int altera_ps_remove(struct spi_device *spi)
 {
-	struct fpga_manager *mgr = spi_get_drvdata(spi);
-
-	fpga_mgr_unregister(mgr);
+	fpga_mgr_unregister(&spi->dev);
 
 	return 0;
 }

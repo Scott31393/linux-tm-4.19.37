@@ -250,10 +250,15 @@ int yama_task_prctl(int option, unsigned long arg2, unsigned long arg3,
 		} else {
 			struct task_struct *tracer;
 
-			tracer = find_get_task_by_vpid(arg2);
-			if (!tracer) {
+			rcu_read_lock();
+			tracer = find_task_by_vpid(arg2);
+			if (tracer)
+				get_task_struct(tracer);
+			else
 				rc = -EINVAL;
-			} else {
+			rcu_read_unlock();
+
+			if (tracer) {
 				rc = yama_ptracer_add(tracer, myself);
 				put_task_struct(tracer);
 			}
@@ -368,9 +373,7 @@ static int yama_ptrace_access_check(struct task_struct *child,
 			break;
 		case YAMA_SCOPE_RELATIONAL:
 			rcu_read_lock();
-			if (!pid_alive(child))
-				rc = -EPERM;
-			if (!rc && !task_is_descendant(current, child) &&
+			if (!task_is_descendant(current, child) &&
 			    !ptracer_exception_found(current, child) &&
 			    !ns_capable(__task_cred(child)->user_ns, CAP_SYS_PTRACE))
 				rc = -EPERM;

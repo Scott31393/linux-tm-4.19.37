@@ -950,4 +950,6 @@ const struct dma_map_ops alpha_pci_ops = {
 	.mapping_error		= alpha_pci_mapping_error,
 	.dma_supported		= alpha_pci_supported,
 };
-EXPORT_SYMBOL(alpha_pci_ops);
+
+const struct dma_map_ops *dma_ops = &alpha_pci_ops;
+EXPORT_SYMBOL(dma_ops);

@@ -1,1 +1,0 @@
-obj-$(CONFIG_ACDC_I2C_TM_DRIVER)	+= ads1115.o

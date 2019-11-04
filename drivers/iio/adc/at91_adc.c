@@ -248,14 +248,12 @@ static irqreturn_t at91_adc_trigger_handler(int irq, void *p)
 	struct iio_poll_func *pf = p;
 	struct iio_dev *idev = pf->indio_dev;
 	struct at91_adc_state *st = iio_priv(idev);
-	struct iio_chan_spec const *chan;
 	int i, j = 0;
 
 	for (i = 0; i < idev->masklength; i++) {
 		if (!test_bit(i, idev->active_scan_mask))
 			continue;
-		chan = idev->channels + i;
-		st->buffer[j] = at91_adc_readl(st, AT91_ADC_CHAN(st, chan->channel));
+		st->buffer[j] = at91_adc_readl(st, AT91_ADC_CHAN(st, i));
 		j++;
 	}
 
@@ -281,8 +279,6 @@ static void handle_adc_eoc_trigger(int irq, struct iio_dev *idev)
 		iio_trigger_poll(idev->trig);
 	} else {
 		st->last_value = at91_adc_readl(st, AT91_ADC_CHAN(st, st->chnb));
-		/* Needed to ACK the DRDY interruption */
-		at91_adc_readl(st, AT91_ADC_LCDR);
 		st->done = true;
 		wake_up_interruptible(&st->wq_data_avail);
 	}
@@ -598,6 +594,7 @@ static int at91_adc_configure_trigger(struct iio_trigger *trig, bool state)
 }
 
 static const struct iio_trigger_ops at91_adc_trigger_ops = {
+	.owner = THIS_MODULE,
 	.set_trigger_state = &at91_adc_configure_trigger,
 };
 
@@ -628,8 +625,8 @@ static int at91_adc_trigger_init(struct iio_dev *idev)
 	struct at91_adc_state *st = iio_priv(idev);
 	int i, ret;
 
-	st->trig = devm_kcalloc(&idev->dev,
-				st->trigger_number, sizeof(*st->trig),
+	st->trig = devm_kzalloc(&idev->dev,
+				st->trigger_number * sizeof(*st->trig),
 				GFP_KERNEL);
 
 	if (st->trig == NULL) {
@@ -704,29 +701,23 @@ static int at91_adc_read_raw(struct iio_dev *idev,
 		ret = wait_event_interruptible_timeout(st->wq_data_avail,
 						       st->done,
 						       msecs_to_jiffies(1000));
+		if (ret == 0)
+			ret = -ETIMEDOUT;
+		if (ret < 0) {
+			mutex_unlock(&st->lock);
+			return ret;
+		}
 
-		/* Disable interrupts, regardless if adc conversion was
-		 * successful or not
-		 */
+		*val = st->last_value;
+
 		at91_adc_writel(st, AT91_ADC_CHDR,
 				AT91_ADC_CH(chan->channel));
 		at91_adc_writel(st, AT91_ADC_IDR, BIT(chan->channel));
 
-		if (ret > 0) {
-			/* a valid conversion took place */
-			*val = st->last_value;
-			st->last_value = 0;
-			st->done = false;
-			ret = IIO_VAL_INT;
-		} else if (ret == 0) {
-			/* conversion timeout */
-			dev_err(&idev->dev, "ADC Channel %d timeout.\n",
-				chan->channel);
-			ret = -ETIMEDOUT;
-		}
-
+		st->last_value = 0;
+		st->done = false;
 		mutex_unlock(&st->lock);
-		return ret;
+		return IIO_VAL_INT;
 
 	case IIO_CHAN_INFO_SCALE:
 		*val = st->vref_mv;
@@ -918,8 +909,7 @@ static int at91_adc_probe_dt(struct at91_adc_state *st,
 	st->registers = &st->caps->registers;
 	st->num_channels = st->caps->num_channels;
 	st->trigger_number = of_get_child_count(node);
-	st->trigger_list = devm_kcalloc(&idev->dev,
-					st->trigger_number,
+	st->trigger_list = devm_kzalloc(&idev->dev, st->trigger_number *
 					sizeof(struct at91_adc_trigger),
 					GFP_KERNEL);
 	if (!st->trigger_list) {
@@ -986,6 +976,7 @@ static int at91_adc_probe_pdata(struct at91_adc_state *st,
 }
 
 static const struct iio_info at91_adc_info = {
+	.driver_module = THIS_MODULE,
 	.read_raw = &at91_adc_read_raw,
 };
 
@@ -1188,9 +1179,9 @@ static int at91_adc_probe(struct platform_device *pdev)
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 
 	st->reg_base = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(st->reg_base))
+	if (IS_ERR(st->reg_base)) {
 		return PTR_ERR(st->reg_base);
-
+	}
 
 	/*
 	 * Disable all IRQs before setting up the handler

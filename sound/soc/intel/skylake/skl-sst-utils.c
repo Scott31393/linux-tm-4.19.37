@@ -178,8 +178,7 @@ static inline int skl_pvtid_128(struct uuid_module *module)
  * skl_get_pvt_id: generate a private id for use as module id
  *
  * @ctx: driver context
- * @uuid_mod: module's uuid
- * @instance_id: module's instance id
+ * @mconfig: module configuration data
  *
  * This generates a 128 bit private unique id for a module TYPE so that
  * module instance is unique
@@ -209,8 +208,7 @@ EXPORT_SYMBOL_GPL(skl_get_pvt_id);
  * skl_put_pvt_id: free up the private id allocated
  *
  * @ctx: driver context
- * @uuid_mod: module's uuid
- * @pvt_id: module pvt id
+ * @mconfig: module configuration data
  *
  * This frees a 128 bit private unique id previously generated
  */

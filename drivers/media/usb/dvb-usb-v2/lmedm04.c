@@ -21,7 +21,7 @@
  *
  * LME2510C + M88RS2000
  *
- * For firmware see Documentation/media/dvb-drivers/lmedm04.rst
+ * For firmware see Documentation/dvb/lmedm04.txt
  *
  * I2C addresses:
  * 0xd0 - STV0288	- Demodulator
@@ -49,7 +49,7 @@
  * GNU General Public License for more details.
  *
  *
- * see Documentation/media/dvb-drivers/dvb-usb.rst for more information
+ * see Documentation/dvb/README.dvb-usb for more information
  *
  * Known Issues :
  *	LME2510: Non Intel USB chipsets fail to maintain High Speed on

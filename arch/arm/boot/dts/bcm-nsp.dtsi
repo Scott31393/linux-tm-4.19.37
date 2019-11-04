@@ -75,7 +75,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		a9pll: arm_clk@0 {
+		a9pll: arm_clk@00000 {
 			#clock-cells = <0>;
 			compatible = "brcm,nsp-armpll";
 			clocks = <&osc>;
@@ -164,7 +164,7 @@
 		#address-cells = <1>;
 		#size-cells = <1>;
 
-		gpioa: gpio@20 {
+		gpioa: gpio@0020 {
 			compatible = "brcm,nsp-gpio-a";
 			reg = <0x0020 0x70>,
 			      <0x3f1c4 0x1c>;
@@ -176,7 +176,7 @@
 			gpio-ranges = <&pinctrl 0 0 32>;
 		};
 
-		uart0: serial@300 {
+		uart0: serial@0300 {
 			compatible = "ns16550a";
 			reg = <0x0300 0x100>;
 			interrupts = <GIC_SPI 85 IRQ_TYPE_LEVEL_HIGH>;
@@ -184,7 +184,7 @@
 			status = "disabled";
 		};
 
-		uart1: serial@400 {
+		uart1: serial@0400 {
 			compatible = "ns16550a";
 			reg = <0x0400 0x100>;
 			interrupts = <GIC_SPI 85 IRQ_TYPE_LEVEL_HIGH>;
@@ -391,7 +391,7 @@
 			reg = <0x38000 0x50>;
 			#address-cells = <1>;
 			#size-cells = <0>;
-			interrupts = <GIC_SPI 89 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 89 IRQ_TYPE_NONE>;
 			clock-frequency = <100000>;
 			dma-coherent;
 			status = "disabled";
@@ -496,7 +496,7 @@
 
 		#interrupt-cells = <1>;
 		interrupt-map-mask = <0 0 0 0>;
-		interrupt-map = <0 0 0 0 &gic GIC_SPI 131 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-map = <0 0 0 0 &gic GIC_SPI 131 IRQ_TYPE_NONE>;
 
 		linux,pci-domain = <0>;
 
@@ -519,10 +519,10 @@
 			compatible = "brcm,iproc-msi";
 			msi-controller;
 			interrupt-parent = <&gic>;
-			interrupts = <GIC_SPI 127 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 128 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 129 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 130 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 127 IRQ_TYPE_NONE>,
+				     <GIC_SPI 128 IRQ_TYPE_NONE>,
+				     <GIC_SPI 129 IRQ_TYPE_NONE>,
+				     <GIC_SPI 130 IRQ_TYPE_NONE>;
 			brcm,pcie-msi-inten;
 		};
 	};
@@ -533,7 +533,7 @@
 
 		#interrupt-cells = <1>;
 		interrupt-map-mask = <0 0 0 0>;
-		interrupt-map = <0 0 0 0 &gic GIC_SPI 137 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-map = <0 0 0 0 &gic GIC_SPI 137 IRQ_TYPE_NONE>;
 
 		linux,pci-domain = <1>;
 
@@ -556,10 +556,10 @@
 			compatible = "brcm,iproc-msi";
 			msi-controller;
 			interrupt-parent = <&gic>;
-			interrupts = <GIC_SPI 133 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 134 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 135 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 136 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 133 IRQ_TYPE_NONE>,
+				     <GIC_SPI 134 IRQ_TYPE_NONE>,
+				     <GIC_SPI 135 IRQ_TYPE_NONE>,
+				     <GIC_SPI 136 IRQ_TYPE_NONE>;
 			brcm,pcie-msi-inten;
 		};
 	};
@@ -570,7 +570,7 @@
 
 		#interrupt-cells = <1>;
 		interrupt-map-mask = <0 0 0 0>;
-		interrupt-map = <0 0 0 0 &gic GIC_SPI 143 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-map = <0 0 0 0 &gic GIC_SPI 143 IRQ_TYPE_NONE>;
 
 		linux,pci-domain = <2>;
 
@@ -593,10 +593,10 @@
 			compatible = "brcm,iproc-msi";
 			msi-controller;
 			interrupt-parent = <&gic>;
-			interrupts = <GIC_SPI 139 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 140 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 141 IRQ_TYPE_LEVEL_HIGH>,
-				     <GIC_SPI 142 IRQ_TYPE_LEVEL_HIGH>;
+			interrupts = <GIC_SPI 139 IRQ_TYPE_NONE>,
+				     <GIC_SPI 140 IRQ_TYPE_NONE>,
+				     <GIC_SPI 141 IRQ_TYPE_NONE>,
+				     <GIC_SPI 142 IRQ_TYPE_NONE>;
 			brcm,pcie-msi-inten;
 		};
 	};

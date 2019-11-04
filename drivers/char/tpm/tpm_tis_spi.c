@@ -152,40 +152,29 @@ static int tpm_tis_spi_write_bytes(struct tpm_tis_data *data, u32 addr,
 
 static int tpm_tis_spi_read16(struct tpm_tis_data *data, u32 addr, u16 *result)
 {
-	__le16 result_le;
 	int rc;
 
-	rc = data->phy_ops->read_bytes(data, addr, sizeof(u16),
-				       (u8 *)&result_le);
+	rc = data->phy_ops->read_bytes(data, addr, sizeof(u16), (u8 *)result);
 	if (!rc)
-		*result = le16_to_cpu(result_le);
-
+		*result = le16_to_cpu(*result);
 	return rc;
 }
 
 static int tpm_tis_spi_read32(struct tpm_tis_data *data, u32 addr, u32 *result)
 {
-	__le32 result_le;
 	int rc;
 
-	rc = data->phy_ops->read_bytes(data, addr, sizeof(u32),
-				       (u8 *)&result_le);
+	rc = data->phy_ops->read_bytes(data, addr, sizeof(u32), (u8 *)result);
 	if (!rc)
-		*result = le32_to_cpu(result_le);
-
+		*result = le32_to_cpu(*result);
 	return rc;
 }
 
 static int tpm_tis_spi_write32(struct tpm_tis_data *data, u32 addr, u32 value)
 {
-	__le32 value_le;
-	int rc;
-
-	value_le = cpu_to_le32(value);
-	rc = data->phy_ops->write_bytes(data, addr, sizeof(u32),
-					(u8 *)&value_le);
-
-	return rc;
+	value = cpu_to_le32(value);
+	return data->phy_ops->write_bytes(data, addr, sizeof(u32),
+					   (u8 *)&value);
 }
 
 static const struct tpm_tis_phy_ops tpm_spi_phy_ops = {
@@ -199,7 +188,6 @@ static const struct tpm_tis_phy_ops tpm_spi_phy_ops = {
 static int tpm_tis_spi_probe(struct spi_device *dev)
 {
 	struct tpm_tis_spi_phy *phy;
-	int irq;
 
 	phy = devm_kzalloc(&dev->dev, sizeof(struct tpm_tis_spi_phy),
 			   GFP_KERNEL);
@@ -212,13 +200,7 @@ static int tpm_tis_spi_probe(struct spi_device *dev)
 	if (!phy->iobuf)
 		return -ENOMEM;
 
-	/* If the SPI device has an IRQ then use that */
-	if (dev->irq > 0)
-		irq = dev->irq;
-	else
-		irq = -1;
-
-	return tpm_tis_core_init(&dev->dev, &phy->priv, irq, &tpm_spi_phy_ops,
+	return tpm_tis_core_init(&dev->dev, &phy->priv, -1, &tpm_spi_phy_ops,
 				 NULL);
 }
 

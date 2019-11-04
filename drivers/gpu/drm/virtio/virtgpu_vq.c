@@ -62,7 +62,6 @@ void virtio_gpu_ctrl_ack(struct virtqueue *vq)
 {
 	struct drm_device *dev = vq->vdev->priv;
 	struct virtio_gpu_device *vgdev = dev->dev_private;
-
 	schedule_work(&vgdev->ctrlq.dequeue_work);
 }
 
@@ -70,7 +69,6 @@ void virtio_gpu_cursor_ack(struct virtqueue *vq)
 {
 	struct drm_device *dev = vq->vdev->priv;
 	struct virtio_gpu_device *vgdev = dev->dev_private;
-
 	schedule_work(&vgdev->cursorq.dequeue_work);
 }
 
@@ -274,7 +272,7 @@ static int virtio_gpu_queue_ctrl_buffer_locked(struct virtio_gpu_device *vgdev,
 		return -ENODEV;
 
 	sg_init_one(&vcmd, vbuf->buf, vbuf->size);
-	sgs[outcnt + incnt] = &vcmd;
+	sgs[outcnt+incnt] = &vcmd;
 	outcnt++;
 
 	if (vbuf->data_size) {
@@ -383,8 +381,7 @@ retry:
 }
 
 /* just create gem objects for userspace and long lived objects,
- * just use dma_alloced pages for the queue objects?
- */
+   just use dma_alloced pages for the queue objects? */
 
 /* create a basic resource */
 void virtio_gpu_cmd_create_resource(struct virtio_gpu_device *vgdev,
@@ -596,6 +593,7 @@ static void virtio_gpu_cmd_capset_cb(struct virtio_gpu_device *vgdev,
 	wake_up(&vgdev->resp_wq);
 }
 
+
 int virtio_gpu_cmd_get_display_info(struct virtio_gpu_device *vgdev)
 {
 	struct virtio_gpu_ctrl_hdr *cmd_p;
@@ -709,8 +707,8 @@ void virtio_gpu_cmd_context_create(struct virtio_gpu_device *vgdev, uint32_t id,
 	cmd_p->hdr.type = cpu_to_le32(VIRTIO_GPU_CMD_CTX_CREATE);
 	cmd_p->hdr.ctx_id = cpu_to_le32(id);
 	cmd_p->nlen = cpu_to_le32(nlen);
-	strncpy(cmd_p->debug_name, name, sizeof(cmd_p->debug_name) - 1);
-	cmd_p->debug_name[sizeof(cmd_p->debug_name) - 1] = 0;
+	strncpy(cmd_p->debug_name, name, sizeof(cmd_p->debug_name)-1);
+	cmd_p->debug_name[sizeof(cmd_p->debug_name)-1] = 0;
 	virtio_gpu_queue_ctrl_buffer(vgdev, vbuf);
 }
 
@@ -854,7 +852,6 @@ int virtio_gpu_object_attach(struct virtio_gpu_device *vgdev,
 
 	if (!obj->pages) {
 		int ret;
-
 		ret = virtio_gpu_object_get_sg_table(vgdev, obj);
 		if (ret)
 			return ret;

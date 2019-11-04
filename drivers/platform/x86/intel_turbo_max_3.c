@@ -125,7 +125,6 @@ static int itmt_legacy_cpu_online(unsigned int cpu)
 
 static const struct x86_cpu_id itmt_legacy_cpu_ids[] = {
 	ICPU(INTEL_FAM6_BROADWELL_X),
-	ICPU(INTEL_FAM6_SKYLAKE_X),
 	{}
 };
 
@@ -136,6 +135,9 @@ static int __init itmt_legacy_init(void)
 
 	id = x86_match_cpu(itmt_legacy_cpu_ids);
 	if (!id)
+		return -ENODEV;
+
+	if (boot_cpu_has(X86_FEATURE_HWP))
 		return -ENODEV;
 
 	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN,

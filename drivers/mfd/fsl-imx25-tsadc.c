@@ -84,7 +84,8 @@ static int mx25_tsadc_setup_irq(struct platform_device *pdev,
 		return -ENOMEM;
 	}
 
-	irq_set_chained_handler_and_data(irq, mx25_tsadc_irq_handler, tsadc);
+	irq_set_chained_handler(irq, mx25_tsadc_irq_handler);
+	irq_set_handler_data(irq, tsadc);
 
 	return 0;
 }

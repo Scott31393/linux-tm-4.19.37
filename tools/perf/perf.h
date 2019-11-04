@@ -5,7 +5,6 @@
 #include <time.h>
 #include <stdbool.h>
 #include <linux/types.h>
-#include <linux/stddef.h>
 #include <linux/perf_event.h>
 
 extern bool test_attr__enabled;
@@ -25,9 +24,7 @@ static inline unsigned long long rdclock(void)
 	return ts.tv_sec * 1000000000ULL + ts.tv_nsec;
 }
 
-#ifndef MAX_NR_CPUS
 #define MAX_NR_CPUS			1024
-#endif
 
 extern const char *input_name;
 extern bool perf_host, perf_guest;
@@ -64,15 +61,12 @@ struct record_opts {
 	bool	     tail_synthesize;
 	bool	     overwrite;
 	bool	     ignore_missing_thread;
-	bool	     strict_freq;
-	bool	     sample_id;
 	unsigned int freq;
 	unsigned int mmap_pages;
 	unsigned int auxtrace_mmap_pages;
 	unsigned int user_freq;
 	u64          branch_stack;
 	u64	     sample_intr_regs;
-	u64	     sample_user_regs;
 	u64	     default_interval;
 	u64	     user_interval;
 	size_t	     auxtrace_snapshot_size;
@@ -87,7 +81,4 @@ struct record_opts {
 struct option;
 extern const char * const *record_usage;
 extern struct option *record_options;
-extern int version_verbose;
-
-int record__parse_freq(const struct option *opt, const char *str, int unset);
 #endif

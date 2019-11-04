@@ -118,9 +118,9 @@ static void req_retry(struct rxe_qp *qp)
 	}
 }
 
-void rnr_nak_timer(struct timer_list *t)
+void rnr_nak_timer(unsigned long data)
 {
-	struct rxe_qp *qp = from_timer(qp, t, rnr_nak_timer);
+	struct rxe_qp *qp = (struct rxe_qp *)data;
 
 	pr_debug("qp#%d rnr nak timer fired\n", qp_num(qp));
 	rxe_run_task(&qp->req.task, 1);
@@ -490,7 +490,7 @@ static int fill_packet(struct rxe_qp *qp, struct rxe_send_wqe *wqe,
 			wqe->dma.resid -= paylen;
 			wqe->dma.sge_offset += paylen;
 		} else {
-			err = copy_data(qp->pd, 0, &wqe->dma,
+			err = copy_data(rxe, qp->pd, 0, &wqe->dma,
 					payload_addr(pkt), paylen,
 					from_mem_obj,
 					&crc);
@@ -640,15 +640,11 @@ next_wqe:
 			rmr->access = wqe->wr.wr.reg.access;
 			rmr->lkey = wqe->wr.wr.reg.key;
 			rmr->rkey = wqe->wr.wr.reg.key;
-			rmr->iova = wqe->wr.wr.reg.mr->iova;
 			wqe->state = wqe_state_done;
 			wqe->status = IB_WC_SUCCESS;
 		} else {
 			goto exit;
 		}
-		if ((wqe->wr.send_flags & IB_SEND_SIGNALED) ||
-		    qp->sq_sig_type == IB_SIGNAL_ALL_WR)
-			rxe_run_task(&qp->comp.task, 1);
 		qp->req.wqe_index = next_index(qp->sq.queue,
 						qp->req.wqe_index);
 		goto next_wqe;
@@ -713,7 +709,6 @@ next_wqe:
 
 	if (fill_packet(qp, wqe, &pkt, skb, payload)) {
 		pr_debug("qp#%d Error during fill packet\n", qp_num(qp));
-		kfree_skb(skb);
 		goto err;
 	}
 
@@ -745,6 +740,7 @@ next_wqe:
 	goto next_wqe;
 
 err:
+	kfree_skb(skb);
 	wqe->status = IB_WC_LOC_PROT_ERR;
 	wqe->state = wqe_state_error;
 	__rxe_do_task(&qp->comp.task);

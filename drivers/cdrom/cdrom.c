@@ -265,7 +265,6 @@
 /* #define ERRLOGMASK (CD_WARNING|CD_OPEN|CD_COUNT_TRACKS|CD_CLOSE) */
 /* #define ERRLOGMASK (CD_WARNING|CD_REG_UNREG|CD_DO_IOCTL|CD_OPEN|CD_CLOSE|CD_COUNT_TRACKS) */
 
-#include <linux/atomic.h>
 #include <linux/module.h>
 #include <linux/fs.h>
 #include <linux/major.h>
@@ -283,7 +282,6 @@
 #include <linux/blkdev.h>
 #include <linux/times.h>
 #include <linux/uaccess.h>
-#include <scsi/scsi_common.h>
 #include <scsi/scsi_request.h>
 
 /* used to tell the module to turn on full debugging messages */
@@ -347,10 +345,10 @@ static LIST_HEAD(cdrom_list);
 int cdrom_dummy_generic_packet(struct cdrom_device_info *cdi,
 			       struct packet_command *cgc)
 {
-	if (cgc->sshdr) {
-		cgc->sshdr->sense_key = 0x05;
-		cgc->sshdr->asc = 0x20;
-		cgc->sshdr->ascq = 0x00;
+	if (cgc->sense) {
+		cgc->sense->sense_key = 0x05;
+		cgc->sense->asc = 0x20;
+		cgc->sense->ascq = 0x00;
 	}
 
 	cgc->stat = -EIO;
@@ -2134,7 +2132,7 @@ static int cdrom_read_cdda_old(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 	 */
 	nr = nframes;
 	do {
-		cgc.buffer = kmalloc_array(nr, CD_FRAMESIZE_RAW, GFP_KERNEL);
+		cgc.buffer = kmalloc(CD_FRAMESIZE_RAW * nr, GFP_KERNEL);
 		if (cgc.buffer)
 			break;
 
@@ -2194,7 +2192,7 @@ static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 
 		len = nr * CD_FRAMESIZE_RAW;
 
-		rq = blk_get_request(q, REQ_OP_SCSI_IN, 0);
+		rq = blk_get_request(q, REQ_OP_SCSI_IN, GFP_KERNEL);
 		if (IS_ERR(rq)) {
 			ret = PTR_ERR(rq);
 			break;
@@ -2224,12 +2222,9 @@ static int cdrom_read_cdda_bpc(struct cdrom_device_info *cdi, __u8 __user *ubuf,
 
 		blk_execute_rq(q, cdi->disk, rq, 0);
 		if (scsi_req(rq)->result) {
-			struct scsi_sense_hdr sshdr;
-
+			struct request_sense *s = req->sense;
 			ret = -EIO;
-			scsi_normalize_sense(req->sense, req->sense_len,
-					     &sshdr);
-			cdi->last_sense = sshdr.sense_key;
+			cdi->last_sense = s->sense_key;
 		}
 
 		if (blk_rq_unmap_user(bio))
@@ -2446,7 +2441,7 @@ static int cdrom_ioctl_select_disc(struct cdrom_device_info *cdi,
 		return -ENOSYS;
 
 	if (arg != CDSL_CURRENT && arg != CDSL_NONE) {
-		if (arg >= cdi->capacity)
+		if ((int)arg >= cdi->capacity)
 			return -EINVAL;
 	}
 
@@ -2547,7 +2542,7 @@ static int cdrom_ioctl_drive_status(struct cdrom_device_info *cdi,
 	if (!CDROM_CAN(CDC_SELECT_DISC) ||
 	    (arg == CDSL_CURRENT || arg == CDSL_NONE))
 		return cdi->ops->drive_status(cdi, CDSL_CURRENT);
-	if (arg >= cdi->capacity)
+	if (((int)arg >= cdi->capacity))
 		return -EINVAL;
 	return cdrom_slot_status(cdi, arg);
 }
@@ -2948,7 +2943,7 @@ static noinline int mmc_ioctl_cdrom_read_data(struct cdrom_device_info *cdi,
 					      struct packet_command *cgc,
 					      int cmd)
 {
-	struct scsi_sense_hdr sshdr;
+	struct request_sense sense;
 	struct cdrom_msf msf;
 	int blocksize = 0, format = 0, lba;
 	int ret;
@@ -2976,13 +2971,13 @@ static noinline int mmc_ioctl_cdrom_read_data(struct cdrom_device_info *cdi,
 	if (cgc->buffer == NULL)
 		return -ENOMEM;
 
-	memset(&sshdr, 0, sizeof(sshdr));
-	cgc->sshdr = &sshdr;
+	memset(&sense, 0, sizeof(sense));
+	cgc->sense = &sense;
 	cgc->data_direction = CGC_DATA_READ;
 	ret = cdrom_read_block(cdi, cgc, lba, 1, format, blocksize);
-	if (ret && sshdr.sense_key == 0x05 &&
-	    sshdr.asc == 0x20 &&
-	    sshdr.ascq == 0x00) {
+	if (ret && sense.sense_key == 0x05 &&
+	    sense.asc == 0x20 &&
+	    sense.ascq == 0x00) {
 		/*
 		 * SCSI-II devices are not required to support
 		 * READ_CD, so let's try switching block size
@@ -2991,7 +2986,7 @@ static noinline int mmc_ioctl_cdrom_read_data(struct cdrom_device_info *cdi,
 		ret = cdrom_switch_blocksize(cdi, blocksize);
 		if (ret)
 			goto out;
-		cgc->sshdr = NULL;
+		cgc->sense = NULL;
 		ret = cdrom_read_cd(cdi, cgc, lba, blocksize, 1);
 		ret |= cdrom_switch_blocksize(cdi, blocksize);
 	}
@@ -3694,9 +3689,9 @@ static struct ctl_table_header *cdrom_sysctl_header;
 
 static void cdrom_sysctl_register(void)
 {
-	static atomic_t initialized = ATOMIC_INIT(0);
+	static int initialized;
 
-	if (!atomic_add_unless(&initialized, 1, 1))
+	if (initialized == 1)
 		return;
 
 	cdrom_sysctl_header = register_sysctl_table(cdrom_root_table);
@@ -3707,6 +3702,8 @@ static void cdrom_sysctl_register(void)
 	cdrom_sysctl_settings.debug = debug;
 	cdrom_sysctl_settings.lock = lockdoor;
 	cdrom_sysctl_settings.check = check_media_type;
+
+	initialized = 1;
 }
 
 static void cdrom_sysctl_unregister(void)

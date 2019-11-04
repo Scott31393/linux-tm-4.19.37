@@ -13,7 +13,7 @@
     (c) 2005-2006 Nickolay V. Shmyrev <nshmyrev@yandex.ru>
 
     Fixes to be fully V4L2 compliant by
-    (c) 2006 Mauro Carvalho Chehab <mchehab@kernel.org>
+    (c) 2006 Mauro Carvalho Chehab <mchehab@infradead.org>
 
     Cropping and overscan support
     Copyright (C) 2005, 2006 Michael H. Schimek <mschimek@gmx.at>
@@ -2955,48 +2955,48 @@ static ssize_t bttv_read(struct file *file, char __user *data,
 	return retval;
 }
 
-static __poll_t bttv_poll(struct file *file, poll_table *wait)
+static unsigned int bttv_poll(struct file *file, poll_table *wait)
 {
 	struct bttv_fh *fh = file->private_data;
 	struct bttv_buffer *buf;
 	enum v4l2_field field;
-	__poll_t rc = 0;
-	__poll_t req_events = poll_requested_events(wait);
+	unsigned int rc = 0;
+	unsigned long req_events = poll_requested_events(wait);
 
 	if (v4l2_event_pending(&fh->fh))
-		rc = EPOLLPRI;
-	else if (req_events & EPOLLPRI)
+		rc = POLLPRI;
+	else if (req_events & POLLPRI)
 		poll_wait(file, &fh->fh.wait, wait);
 
-	if (!(req_events & (EPOLLIN | EPOLLRDNORM)))
+	if (!(req_events & (POLLIN | POLLRDNORM)))
 		return rc;
 
 	if (V4L2_BUF_TYPE_VBI_CAPTURE == fh->type) {
 		if (!check_alloc_btres_lock(fh->btv,fh,RESOURCE_VBI))
-			return rc | EPOLLERR;
+			return rc | POLLERR;
 		return rc | videobuf_poll_stream(file, &fh->vbi, wait);
 	}
 
 	if (check_btres(fh,RESOURCE_VIDEO_STREAM)) {
 		/* streaming capture */
 		if (list_empty(&fh->cap.stream))
-			return rc | EPOLLERR;
+			return rc | POLLERR;
 		buf = list_entry(fh->cap.stream.next,struct bttv_buffer,vb.stream);
 	} else {
 		/* read() capture */
 		if (NULL == fh->cap.read_buf) {
 			/* need to capture a new frame */
 			if (locked_btres(fh->btv,RESOURCE_VIDEO_STREAM))
-				return rc | EPOLLERR;
+				return rc | POLLERR;
 			fh->cap.read_buf = videobuf_sg_alloc(fh->cap.msize);
 			if (NULL == fh->cap.read_buf)
-				return rc | EPOLLERR;
+				return rc | POLLERR;
 			fh->cap.read_buf->memory = V4L2_MEMORY_USERPTR;
 			field = videobuf_next_field(&fh->cap);
 			if (0 != fh->cap.ops->buf_prepare(&fh->cap,fh->cap.read_buf,field)) {
 				kfree (fh->cap.read_buf);
 				fh->cap.read_buf = NULL;
-				return rc | EPOLLERR;
+				return rc | POLLERR;
 			}
 			fh->cap.ops->buf_queue(&fh->cap,fh->cap.read_buf);
 			fh->cap.read_off = 0;
@@ -3007,7 +3007,7 @@ static __poll_t bttv_poll(struct file *file, poll_table *wait)
 	poll_wait(file, &buf->vb.done, wait);
 	if (buf->vb.state == VIDEOBUF_DONE ||
 	    buf->vb.state == VIDEOBUF_ERROR)
-		rc = rc | EPOLLIN|EPOLLRDNORM;
+		rc = rc | POLLIN|POLLRDNORM;
 	return rc;
 }
 
@@ -3329,25 +3329,25 @@ static ssize_t radio_read(struct file *file, char __user *data,
 	return cmd.result;
 }
 
-static __poll_t radio_poll(struct file *file, poll_table *wait)
+static unsigned int radio_poll(struct file *file, poll_table *wait)
 {
 	struct bttv_fh *fh = file->private_data;
 	struct bttv *btv = fh->btv;
-	__poll_t req_events = poll_requested_events(wait);
+	unsigned long req_events = poll_requested_events(wait);
 	struct saa6588_command cmd;
-	__poll_t res = 0;
+	unsigned int res = 0;
 
 	if (v4l2_event_pending(&fh->fh))
-		res = EPOLLPRI;
-	else if (req_events & EPOLLPRI)
+		res = POLLPRI;
+	else if (req_events & POLLPRI)
 		poll_wait(file, &fh->fh.wait, wait);
 	radio_enable(btv);
 	cmd.instance = file;
 	cmd.event_list = wait;
-	cmd.poll_mask = res;
+	cmd.result = res;
 	bttv_call_all(btv, core, ioctl, SAA6588_CMD_POLL, &cmd);
 
-	return cmd.poll_mask;
+	return cmd.result;
 }
 
 static const struct v4l2_file_operations radio_fops =
@@ -3511,7 +3511,7 @@ static void bttv_irq_debug_low_latency(struct bttv *btv, u32 rc)
 	}
 	pr_notice("%d: Uhm. Looks like we have unusual high IRQ latencies\n",
 		  btv->c.nr);
-	pr_notice("%d: Lets try to catch the culprit red-handed ...\n",
+	pr_notice("%d: Lets try to catch the culpit red-handed ...\n",
 		  btv->c.nr);
 	dump_stack();
 }
@@ -3652,9 +3652,9 @@ bttv_irq_wakeup_vbi(struct bttv *btv, struct bttv_buffer *wakeup,
 	wake_up(&wakeup->vb.done);
 }
 
-static void bttv_irq_timeout(struct timer_list *t)
+static void bttv_irq_timeout(unsigned long data)
 {
-	struct bttv *btv = from_timer(btv, t, timeout);
+	struct bttv *btv = (struct bttv *)data;
 	struct bttv_buffer_set old,new;
 	struct bttv_buffer *ovbi;
 	struct bttv_buffer *item;
@@ -4043,7 +4043,7 @@ static int bttv_probe(struct pci_dev *dev, const struct pci_device_id *pci_id)
 	INIT_LIST_HEAD(&btv->capture);
 	INIT_LIST_HEAD(&btv->vcapture);
 
-	timer_setup(&btv->timeout, bttv_irq_timeout, 0);
+	setup_timer(&btv->timeout, bttv_irq_timeout, (unsigned long)btv);
 
 	btv->i2c_rc = -1;
 	btv->tuner_type  = UNSET;

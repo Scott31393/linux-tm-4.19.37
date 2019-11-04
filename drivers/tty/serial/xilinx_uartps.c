@@ -1,8 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Cadence UART driver (found in Xilinx Zynq)
  *
  * 2011 - 2014 (C) Xilinx Inc.
+ *
+ * This program is free software; you can redistribute it
+ * and/or modify it under the terms of the GNU General Public
+ * License as published by the Free Software Foundation;
+ * either version 2 of the License, or (at your option) any
+ * later version.
  *
  * This driver has originally been pushed by Xilinx using a Zynq-branding. This
  * still shows in the naming of this file, the kconfig symbols and some symbols
@@ -125,7 +130,7 @@ MODULE_PARM_DESC(rx_timeout, "Rx timeout, 1-255");
 #define CDNS_UART_IXR_RXTRIG	0x00000001 /* RX FIFO trigger interrupt */
 #define CDNS_UART_IXR_RXFULL	0x00000004 /* RX FIFO full interrupt. */
 #define CDNS_UART_IXR_RXEMPTY	0x00000002 /* RX FIFO empty interrupt. */
-#define CDNS_UART_IXR_RXMASK	0x000021e7 /* Valid RX bit mask */
+#define CDNS_UART_IXR_MASK	0x00001FFF /* Valid bit mask */
 
 	/*
 	 * Do not enable parity error interrupt for the following
@@ -167,7 +172,6 @@ MODULE_PARM_DESC(rx_timeout, "Rx timeout, 1-255");
 #define CDNS_UART_SR_TXEMPTY	0x00000008 /* TX FIFO empty */
 #define CDNS_UART_SR_TXFULL	0x00000010 /* TX FIFO full */
 #define CDNS_UART_SR_RXTRIG	0x00000001 /* Rx Trigger */
-#define CDNS_UART_SR_TACTIVE	0x00000800 /* TX state machine active */
 
 /* baud dividers min/max values */
 #define CDNS_UART_BDIV_MIN	4
@@ -362,13 +366,7 @@ static irqreturn_t cdns_uart_isr(int irq, void *dev_id)
 		cdns_uart_handle_tx(dev_id);
 		isrstatus &= ~CDNS_UART_IXR_TXEMPTY;
 	}
-
-	/*
-	 * Skip RX processing if RX is disabled as RXEMPTY will never be set
-	 * as read bytes will not be removed from the FIFO.
-	 */
-	if (isrstatus & CDNS_UART_IXR_RXMASK &&
-	    !(readl(port->membase + CDNS_UART_CR) & CDNS_UART_CR_RX_DIS))
+	if (isrstatus & CDNS_UART_IXR_MASK)
 		cdns_uart_handle_rx(dev_id, isrstatus);
 
 	spin_unlock(&port->lock);
@@ -836,7 +834,7 @@ static int cdns_uart_startup(struct uart_port *port)
 	 * the receiver.
 	 */
 	status = readl(port->membase + CDNS_UART_CR);
-	status &= ~CDNS_UART_CR_RX_DIS;
+	status &= CDNS_UART_CR_RX_DIS;
 	status |= CDNS_UART_CR_RX_EN;
 	writel(status, port->membase + CDNS_UART_CR);
 
@@ -1104,7 +1102,56 @@ static const struct uart_ops cdns_uart_ops = {
 #endif
 };
 
+static struct uart_port cdns_uart_port[CDNS_UART_NR_PORTS];
+
+/**
+ * cdns_uart_get_port - Configure the port from platform device resource info
+ * @id: Port id
+ *
+ * Return: a pointer to a uart_port or NULL for failure
+ */
+static struct uart_port *cdns_uart_get_port(int id)
+{
+	struct uart_port *port;
+
+	/* Try the given port id if failed use default method */
+	if (id < CDNS_UART_NR_PORTS && cdns_uart_port[id].mapbase != 0) {
+		/* Find the next unused port */
+		for (id = 0; id < CDNS_UART_NR_PORTS; id++)
+			if (cdns_uart_port[id].mapbase == 0)
+				break;
+	}
+
+	if (id >= CDNS_UART_NR_PORTS)
+		return NULL;
+
+	port = &cdns_uart_port[id];
+
+	/* At this point, we've got an empty uart_port struct, initialize it */
+	spin_lock_init(&port->lock);
+	port->membase	= NULL;
+	port->irq	= 0;
+	port->type	= PORT_UNKNOWN;
+	port->iotype	= UPIO_MEM32;
+	port->flags	= UPF_BOOT_AUTOCONF;
+	port->ops	= &cdns_uart_ops;
+	port->fifosize	= CDNS_UART_FIFO_SIZE;
+	port->line	= id;
+	port->dev	= NULL;
+	return port;
+}
+
 #ifdef CONFIG_SERIAL_XILINX_PS_UART_CONSOLE
+/**
+ * cdns_uart_console_wait_tx - Wait for the TX to be full
+ * @port: Handle to the uart port structure
+ */
+static void cdns_uart_console_wait_tx(struct uart_port *port)
+{
+	while (!(readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXEMPTY))
+		barrier();
+}
+
 /**
  * cdns_uart_console_putchar - write the character to the FIFO buffer
  * @port: Handle to the uart port structure
@@ -1112,8 +1159,7 @@ static const struct uart_ops cdns_uart_ops = {
  */
 static void cdns_uart_console_putchar(struct uart_port *port, int ch)
 {
-	while (readl(port->membase + CDNS_UART_SR) & CDNS_UART_SR_TXFULL)
-		cpu_relax();
+	cdns_uart_console_wait_tx(port);
 	writel(ch, port->membase + CDNS_UART_FIFO);
 }
 
@@ -1140,7 +1186,7 @@ static int __init cdns_early_console_setup(struct earlycon_device *device,
 	/* only set baud if specified on command line - otherwise
 	 * assume it has been initialized by a boot loader.
 	 */
-	if (port->uartclk && device->baud) {
+	if (device->baud) {
 		u32 cd = 0, bdiv = 0;
 		u32 mr;
 		int div8;
@@ -1165,10 +1211,6 @@ OF_EARLYCON_DECLARE(cdns, "cdns,uart-r1p8", cdns_early_console_setup);
 OF_EARLYCON_DECLARE(cdns, "cdns,uart-r1p12", cdns_early_console_setup);
 OF_EARLYCON_DECLARE(cdns, "xlnx,zynqmp-uart", cdns_early_console_setup);
 
-
-/* Static pointer to console port */
-static struct uart_port *console_port;
-
 /**
  * cdns_uart_console_write - perform write operation
  * @co: Console handle
@@ -1178,7 +1220,7 @@ static struct uart_port *console_port;
 static void cdns_uart_console_write(struct console *co, const char *s,
 				unsigned int count)
 {
-	struct uart_port *port = console_port;
+	struct uart_port *port = &cdns_uart_port[co->index];
 	unsigned long flags;
 	unsigned int imr, ctrl;
 	int locked = 1;
@@ -1204,10 +1246,9 @@ static void cdns_uart_console_write(struct console *co, const char *s,
 	writel(ctrl, port->membase + CDNS_UART_CR);
 
 	uart_console_write(port, s, count, cdns_uart_console_putchar);
-	while ((readl(port->membase + CDNS_UART_SR) &
-			(CDNS_UART_SR_TXEMPTY | CDNS_UART_SR_TACTIVE)) !=
-			CDNS_UART_SR_TXEMPTY)
-		cpu_relax();
+	cdns_uart_console_wait_tx(port);
+
+	writel(ctrl, port->membase + CDNS_UART_CR);
 
 	/* restore interrupt state */
 	writel(imr, port->membase + CDNS_UART_IER);
@@ -1223,14 +1264,16 @@ static void cdns_uart_console_write(struct console *co, const char *s,
  *
  * Return: 0 on success, negative errno otherwise.
  */
-static int cdns_uart_console_setup(struct console *co, char *options)
+static int __init cdns_uart_console_setup(struct console *co, char *options)
 {
-	struct uart_port *port = console_port;
-
+	struct uart_port *port = &cdns_uart_port[co->index];
 	int baud = 9600;
 	int bits = 8;
 	int parity = 'n';
 	int flow = 'n';
+
+	if (co->index < 0 || co->index >= CDNS_UART_NR_PORTS)
+		return -EINVAL;
 
 	if (!port->membase) {
 		pr_debug("console on " CDNS_UART_TTY_NAME "%i not present\n",
@@ -1255,6 +1298,20 @@ static struct console cdns_uart_console = {
 	.index	= -1, /* Specified on the cmdline (e.g. console=ttyPS ) */
 	.data	= &cdns_uart_uart_driver,
 };
+
+/**
+ * cdns_uart_console_init - Initialization call
+ *
+ * Return: 0 on success, negative errno otherwise
+ */
+static int __init cdns_uart_console_init(void)
+{
+	register_console(&cdns_uart_console);
+	return 0;
+}
+
+console_initcall(cdns_uart_console_init);
+
 #endif /* CONFIG_SERIAL_XILINX_PS_UART_CONSOLE */
 
 static struct uart_driver cdns_uart_uart_driver = {
@@ -1378,7 +1435,8 @@ static int cdns_uart_resume(struct device *device)
 #endif /* ! CONFIG_PM_SLEEP */
 static int __maybe_unused cdns_runtime_suspend(struct device *dev)
 {
-	struct uart_port *port = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct uart_port *port = platform_get_drvdata(pdev);
 	struct cdns_uart *cdns_uart = port->private_data;
 
 	clk_disable(cdns_uart->uartclk);
@@ -1388,7 +1446,8 @@ static int __maybe_unused cdns_runtime_suspend(struct device *dev)
 
 static int __maybe_unused cdns_runtime_resume(struct device *dev)
 {
-	struct uart_port *port = dev_get_drvdata(dev);
+	struct platform_device *pdev = to_platform_device(dev);
+	struct uart_port *port = platform_get_drvdata(pdev);
 	struct cdns_uart *cdns_uart = port->private_data;
 
 	clk_enable(cdns_uart->pclk);
@@ -1432,9 +1491,6 @@ static int cdns_uart_probe(struct platform_device *pdev)
 	cdns_uart_data = devm_kzalloc(&pdev->dev, sizeof(*cdns_uart_data),
 			GFP_KERNEL);
 	if (!cdns_uart_data)
-		return -ENOMEM;
-	port = devm_kzalloc(&pdev->dev, sizeof(*port), GFP_KERNEL);
-	if (!port)
 		return -ENOMEM;
 
 	match = of_match_node(cdns_uart_of_match, pdev->dev.of_node);
@@ -1501,23 +1557,14 @@ static int cdns_uart_probe(struct platform_device *pdev)
 	if (id < 0)
 		id = 0;
 
-	if (id >= CDNS_UART_NR_PORTS) {
+	/* Initialize the port structure */
+	port = cdns_uart_get_port(id);
+
+	if (!port) {
 		dev_err(&pdev->dev, "Cannot get uart_port structure\n");
 		rc = -ENODEV;
 		goto err_out_notif_unreg;
 	}
-
-	/* At this point, we've got an empty uart_port struct, initialize it */
-	spin_lock_init(&port->lock);
-	port->membase	= NULL;
-	port->irq	= 0;
-	port->type	= PORT_UNKNOWN;
-	port->iotype	= UPIO_MEM32;
-	port->flags	= UPF_BOOT_AUTOCONF;
-	port->ops	= &cdns_uart_ops;
-	port->fifosize	= CDNS_UART_FIFO_SIZE;
-	port->line	= id;
-	port->dev	= NULL;
 
 	/*
 	 * Register the port.
@@ -1537,29 +1584,12 @@ static int cdns_uart_probe(struct platform_device *pdev)
 	pm_runtime_set_active(&pdev->dev);
 	pm_runtime_enable(&pdev->dev);
 
-#ifdef CONFIG_SERIAL_XILINX_PS_UART_CONSOLE
-	/*
-	 * If console hasn't been found yet try to assign this port
-	 * because it is required to be assigned for console setup function.
-	 * If register_console() don't assign value, then console_port pointer
-	 * is cleanup.
-	 */
-	if (cdns_uart_uart_driver.cons->index == -1)
-		console_port = port;
-#endif
-
 	rc = uart_add_one_port(&cdns_uart_uart_driver, port);
 	if (rc) {
 		dev_err(&pdev->dev,
 			"uart_add_one_port() failed; err=%i\n", rc);
 		goto err_out_pm_disable;
 	}
-
-#ifdef CONFIG_SERIAL_XILINX_PS_UART_CONSOLE
-	/* This is not port which is used for console that's why clean it up */
-	if (cdns_uart_uart_driver.cons->index == -1)
-		console_port = NULL;
-#endif
 
 	return 0;
 
@@ -1614,7 +1644,6 @@ static struct platform_driver cdns_uart_platform_driver = {
 		.name = CDNS_UART_NAME,
 		.of_match_table = cdns_uart_of_match,
 		.pm = &cdns_uart_dev_pm_ops,
-		.suppress_bind_attrs = IS_BUILTIN(CONFIG_SERIAL_XILINX_PS_UART),
 		},
 };
 
@@ -1644,7 +1673,7 @@ static void __exit cdns_uart_exit(void)
 	uart_unregister_driver(&cdns_uart_uart_driver);
 }
 
-arch_initcall(cdns_uart_init);
+module_init(cdns_uart_init);
 module_exit(cdns_uart_exit);
 
 MODULE_DESCRIPTION("Driver for Cadence UART");

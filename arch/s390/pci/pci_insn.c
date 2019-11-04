@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * s390 specific pci instructions
  *
@@ -88,9 +87,6 @@ int zpci_refresh_trans(u64 fn, u64 addr, u64 range)
 
 	if (cc)
 		zpci_err_insn(cc, status, addr, range);
-
-	if (cc == 1 && (status == 4 || status == 16))
-		return -ENOMEM;
 
 	return (cc) ? -EIO : 0;
 }

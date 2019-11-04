@@ -6,11 +6,10 @@
 #include <linux/page_ext.h>
 #include <linux/poison.h>
 #include <linux/ratelimit.h>
-#include <linux/kasan.h>
 
 static bool want_page_poisoning __read_mostly;
 
-static int __init early_page_poison_param(char *buf)
+static int early_page_poison_param(char *buf)
 {
 	if (!buf)
 		return -EINVAL;
@@ -35,10 +34,7 @@ static void poison_page(struct page *page)
 {
 	void *addr = kmap_atomic(page);
 
-	/* KASAN still think the page is in-use, so skip it. */
-	kasan_disable_current();
 	memset(addr, PAGE_POISON, PAGE_SIZE);
-	kasan_enable_current();
 	kunmap_atomic(addr);
 }
 

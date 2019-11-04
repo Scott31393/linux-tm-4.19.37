@@ -91,9 +91,11 @@ enum {
 	IPOIB_STOP_REAPER	  = 7,
 	IPOIB_FLAG_ADMIN_CM	  = 9,
 	IPOIB_FLAG_UMCAST	  = 10,
+	IPOIB_STOP_NEIGH_GC	  = 11,
 	IPOIB_NEIGH_TBL_FLUSH	  = 12,
 	IPOIB_FLAG_DEV_ADDR_SET	  = 13,
 	IPOIB_FLAG_DEV_ADDR_CTRL  = 14,
+	IPOIB_FLAG_GOING_DOWN	  = 15,
 
 	IPOIB_MAX_BACKOFF_SECONDS = 16,
 
@@ -109,7 +111,7 @@ enum {
 	IPOIB_MCAST_FLAG_BUSY	  = 2,
 	IPOIB_MCAST_FLAG_ATTACHED = 3,
 
-	MAX_SEND_CQE		  = 64,
+	MAX_SEND_CQE		  = 16,
 	IPOIB_CM_COPYBREAK	  = 256,
 
 	IPOIB_NON_CHILD		  = 0,
@@ -191,6 +193,11 @@ struct ipoib_tx_buf {
 	u64		mapping[MAX_SKB_FRAGS + 1];
 };
 
+struct ipoib_cm_tx_buf {
+	struct sk_buff *skb;
+	u64		mapping;
+};
+
 struct ib_cm_id;
 
 struct ipoib_cm_data {
@@ -248,12 +255,13 @@ struct ipoib_cm_tx {
 	struct list_head     list;
 	struct net_device   *dev;
 	struct ipoib_neigh  *neigh;
+	struct ipoib_path   *path;
 	struct ipoib_tx_buf *tx_ring;
-	unsigned int	     tx_head;
-	unsigned int	     tx_tail;
+	unsigned	     tx_head;
+	unsigned	     tx_tail;
 	unsigned long	     flags;
 	u32		     mtu;
-	unsigned int         max_send_sge;
+	unsigned             max_send_sge;
 };
 
 struct ipoib_cm_rx_buf {
@@ -322,22 +330,14 @@ struct ipoib_dev_priv {
 	spinlock_t lock;
 
 	struct net_device *dev;
-	void (*next_priv_destructor)(struct net_device *dev);
 
-	struct napi_struct send_napi;
-	struct napi_struct recv_napi;
+	struct napi_struct napi;
 
 	unsigned long flags;
 
-	/*
-	 * This protects access to the child_intfs list.
-	 * To READ from child_intfs the RTNL or vlan_rwsem read side must be
-	 * held.  To WRITE RTNL and the vlan_rwsem write side must be held (in
-	 * that order) This lock exists because we have a few contexts where
-	 * we need the child_intfs, but do not want to grab the RTNL.
-	 */
 	struct rw_semaphore vlan_rwsem;
 	struct mutex mcast_mutex;
+	struct mutex sysfs_mutex;
 
 	struct rb_root  path_tree;
 	struct list_head path_list;
@@ -377,10 +377,11 @@ struct ipoib_dev_priv {
 	struct ipoib_rx_buf *rx_ring;
 
 	struct ipoib_tx_buf *tx_ring;
-	unsigned int	     tx_head;
-	unsigned int	     tx_tail;
+	unsigned	     tx_head;
+	unsigned	     tx_tail;
 	struct ib_sge	     tx_sge[MAX_SKB_FRAGS + 1];
 	struct ib_ud_wr      tx_wr;
+	unsigned	     tx_outstanding;
 	struct ib_wc	     send_wc[MAX_SEND_CQE];
 
 	struct ib_recv_wr    rx_wr;
@@ -408,7 +409,8 @@ struct ipoib_dev_priv {
 #endif
 	u64	hca_caps;
 	struct ipoib_ethtool_st ethtool;
-	unsigned int max_send_sge;
+	struct timer_list poll_timer;
+	unsigned max_send_sge;
 	bool sm_fullmember_sendonly_support;
 	const struct net_device_ops	*rn_ops;
 };
@@ -418,8 +420,7 @@ struct ipoib_ah {
 	struct ib_ah	  *ah;
 	struct list_head   list;
 	struct kref	   ref;
-	unsigned int	   last_send;
-	int  		   valid;
+	unsigned	   last_send;
 };
 
 struct ipoib_path {
@@ -436,6 +437,7 @@ struct ipoib_path {
 
 	struct rb_node	      rb_node;
 	struct list_head      list;
+	int  		      valid;
 };
 
 struct ipoib_neigh {
@@ -474,10 +476,9 @@ extern struct workqueue_struct *ipoib_workqueue;
 
 /* functions */
 
-int ipoib_rx_poll(struct napi_struct *napi, int budget);
-int ipoib_tx_poll(struct napi_struct *napi, int budget);
-void ipoib_ib_rx_completion(struct ib_cq *cq, void *ctx_ptr);
-void ipoib_ib_tx_completion(struct ib_cq *cq, void *ctx_ptr);
+int ipoib_poll(struct napi_struct *napi, int budget);
+void ipoib_ib_completion(struct ib_cq *cq, void *dev_ptr);
+void ipoib_send_comp_handler(struct ib_cq *cq, void *dev_ptr);
 
 struct ipoib_ah *ipoib_create_ah(struct net_device *dev,
 				 struct ib_pd *pd, struct rdma_ah_attr *attr);
@@ -487,7 +488,6 @@ static inline void ipoib_put_ah(struct ipoib_ah *ah)
 	kref_put(&ah->ref, ipoib_free_ah);
 }
 int ipoib_open(struct net_device *dev);
-void ipoib_intf_free(struct net_device *dev);
 int ipoib_add_pkey_attr(struct net_device *dev);
 int ipoib_add_umcast_attr(struct net_device *dev);
 
@@ -500,7 +500,7 @@ void ipoib_mark_paths_invalid(struct net_device *dev);
 void ipoib_flush_paths(struct net_device *dev);
 struct ipoib_dev_priv *ipoib_intf_alloc(struct ib_device *hca, u8 port,
 					const char *format);
-void ipoib_ib_tx_timer_func(struct timer_list *t);
+void ipoib_ib_tx_timer_func(unsigned long ctx);
 void ipoib_ib_dev_flush_light(struct work_struct *work);
 void ipoib_ib_dev_flush_normal(struct work_struct *work);
 void ipoib_ib_dev_flush_heavy(struct work_struct *work);
@@ -514,6 +514,9 @@ void ipoib_ib_dev_up(struct net_device *dev);
 void ipoib_ib_dev_down(struct net_device *dev);
 int ipoib_ib_dev_stop_default(struct net_device *dev);
 void ipoib_pkey_dev_check_presence(struct net_device *dev);
+
+int ipoib_dev_init(struct net_device *dev, struct ib_device *ca, int port);
+void ipoib_dev_cleanup(struct net_device *dev);
 
 void ipoib_mcast_join_task(struct work_struct *work);
 void ipoib_mcast_carrier_on_task(struct work_struct *work);
@@ -602,6 +605,7 @@ void ipoib_pkey_open(struct ipoib_dev_priv *priv);
 void ipoib_drain_cq(struct net_device *dev);
 
 void ipoib_set_ethtool_ops(struct net_device *dev);
+void ipoib_set_dev_features(struct ipoib_dev_priv *priv, struct ib_device *hca);
 
 #define IPOIB_FLAGS_RC		0x80
 #define IPOIB_FLAGS_UC		0x40
@@ -730,7 +734,7 @@ void ipoib_cm_dev_stop(struct net_device *dev)
 static inline
 int ipoib_cm_dev_init(struct net_device *dev)
 {
-	return -EOPNOTSUPP;
+	return -ENOSYS;
 }
 
 static inline

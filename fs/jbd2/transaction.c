@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * linux/fs/jbd2/transaction.c
  *
  * Written by Stephen C. Tweedie <sct@redhat.com>, 1998
  *
  * Copyright 1998 Red Hat corp --- All Rights Reserved
+ *
+ * This file is part of the Linux kernel and is made available under
+ * the terms of the GNU General Public License, version 2, or at your
+ * option, any later version, incorporated herein by reference.
  *
  * Generic filesystem transaction handling code; part of the ext2fs
  * journaling system.
@@ -49,8 +52,10 @@ int __init jbd2_journal_init_transaction_cache(void)
 
 void jbd2_journal_destroy_transaction_cache(void)
 {
-	kmem_cache_destroy(transaction_cache);
-	transaction_cache = NULL;
+	if (transaction_cache) {
+		kmem_cache_destroy(transaction_cache);
+		transaction_cache = NULL;
+	}
 }
 
 void jbd2_journal_free_transaction(transaction_t *transaction)
@@ -1219,12 +1224,11 @@ int jbd2_journal_get_undo_access(handle_t *handle, struct buffer_head *bh)
 	struct journal_head *jh;
 	char *committed_data = NULL;
 
+	JBUFFER_TRACE(jh, "entry");
 	if (jbd2_write_access_granted(handle, bh, true))
 		return 0;
 
 	jh = jbd2_journal_add_journal_head(bh);
-	JBUFFER_TRACE(jh, "entry");
-
 	/*
 	 * Do this first --- it can drop the journal lock, so we want to
 	 * make sure that obtaining the committed_data is done
@@ -1335,17 +1339,15 @@ int jbd2_journal_dirty_metadata(handle_t *handle, struct buffer_head *bh)
 
 	if (is_handle_aborted(handle))
 		return -EROFS;
-	if (!buffer_jbd(bh))
-		return -EUCLEAN;
-
+	if (!buffer_jbd(bh)) {
+		ret = -EUCLEAN;
+		goto out;
+	}
 	/*
 	 * We don't grab jh reference here since the buffer must be part
 	 * of the running transaction.
 	 */
 	jh = bh2jh(bh);
-	jbd_debug(5, "journal_head %p\n", jh);
-	JBUFFER_TRACE(jh, "entry");
-
 	/*
 	 * This and the following assertions are unreliable since we may see jh
 	 * in inconsistent state unless we grab bh_state lock. But this is
@@ -1379,6 +1381,9 @@ int jbd2_journal_dirty_metadata(handle_t *handle, struct buffer_head *bh)
 	}
 
 	journal = transaction->t_journal;
+	jbd_debug(5, "journal_head %p\n", jh);
+	JBUFFER_TRACE(jh, "entry");
+
 	jbd_lock_bh_state(bh);
 
 	if (jh->b_modified == 0) {
@@ -1576,21 +1581,14 @@ int jbd2_journal_forget (handle_t *handle, struct buffer_head *bh)
 		/* However, if the buffer is still owned by a prior
 		 * (committing) transaction, we can't drop it yet... */
 		JBUFFER_TRACE(jh, "belongs to older transaction");
-		/* ... but we CAN drop it from the new transaction through
-		 * marking the buffer as freed and set j_next_transaction to
-		 * the new transaction, so that not only the commit code
-		 * knows it should clear dirty bits when it is done with the
-		 * buffer, but also the buffer can be checkpointed only
-		 * after the new transaction commits. */
+		/* ... but we CAN drop it from the new transaction if we
+		 * have also modified it since the original commit. */
 
-		set_buffer_freed(bh);
-
-		if (!jh->b_next_transaction) {
-			spin_lock(&journal->j_list_lock);
-			jh->b_next_transaction = transaction;
-			spin_unlock(&journal->j_list_lock);
-		} else {
+		if (jh->b_next_transaction) {
 			J_ASSERT(jh->b_next_transaction == transaction);
+			spin_lock(&journal->j_list_lock);
+			jh->b_next_transaction = NULL;
+			spin_unlock(&journal->j_list_lock);
 
 			/*
 			 * only drop a reference if this transaction modified

@@ -88,7 +88,7 @@ static int utimes_common(const struct path *path, struct timespec64 *times)
 	}
 retry_deleg:
 	inode_lock(inode);
-	error = notify_change(path->dentry, &newattrs, &delegated_inode);
+	error = notify_change2(path->mnt, path->dentry, &newattrs, &delegated_inode);
 	inode_unlock(inode);
 	if (delegated_inode) {
 		error = break_deleg_wait(&delegated_inode);
@@ -184,8 +184,8 @@ SYSCALL_DEFINE4(utimensat, int, dfd, const char __user *, filename,
 	return do_utimes(dfd, filename, utimes ? tstimes : NULL, flags);
 }
 
-static long do_futimesat(int dfd, const char __user *filename,
-			 struct timeval __user *utimes)
+SYSCALL_DEFINE3(futimesat, int, dfd, const char __user *, filename,
+		struct timeval __user *, utimes)
 {
 	struct timeval times[2];
 	struct timespec64 tstimes[2];
@@ -212,17 +212,10 @@ static long do_futimesat(int dfd, const char __user *filename,
 	return do_utimes(dfd, filename, utimes ? tstimes : NULL, 0);
 }
 
-
-SYSCALL_DEFINE3(futimesat, int, dfd, const char __user *, filename,
-		struct timeval __user *, utimes)
-{
-	return do_futimesat(dfd, filename, utimes);
-}
-
 SYSCALL_DEFINE2(utimes, char __user *, filename,
 		struct timeval __user *, utimes)
 {
-	return do_futimesat(AT_FDCWD, filename, utimes);
+	return sys_futimesat(AT_FDCWD, filename, utimes);
 }
 
 #ifdef CONFIG_COMPAT
@@ -260,8 +253,7 @@ COMPAT_SYSCALL_DEFINE4(utimensat, unsigned int, dfd, const char __user *, filena
 	return do_utimes(dfd, filename, t ? tv : NULL, flags);
 }
 
-static long do_compat_futimesat(unsigned int dfd, const char __user *filename,
-				struct compat_timeval __user *t)
+COMPAT_SYSCALL_DEFINE3(futimesat, unsigned int, dfd, const char __user *, filename, struct compat_timeval __user *, t)
 {
 	struct timespec64 tv[2];
 
@@ -280,15 +272,8 @@ static long do_compat_futimesat(unsigned int dfd, const char __user *filename,
 	return do_utimes(dfd, filename, t ? tv : NULL, 0);
 }
 
-COMPAT_SYSCALL_DEFINE3(futimesat, unsigned int, dfd,
-		       const char __user *, filename,
-		       struct compat_timeval __user *, t)
-{
-	return do_compat_futimesat(dfd, filename, t);
-}
-
 COMPAT_SYSCALL_DEFINE2(utimes, const char __user *, filename, struct compat_timeval __user *, t)
 {
-	return do_compat_futimesat(AT_FDCWD, filename, t);
+	return compat_sys_futimesat(AT_FDCWD, filename, t);
 }
 #endif

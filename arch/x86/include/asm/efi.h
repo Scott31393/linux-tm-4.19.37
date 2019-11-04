@@ -7,7 +7,6 @@
 #include <asm/processor-flags.h>
 #include <asm/tlb.h>
 #include <asm/nospec-branch.h>
-#include <asm/mmu_context.h>
 
 /*
  * We map the EFI regions needed for runtime services non-contiguously,
@@ -70,13 +69,14 @@ extern asmlinkage u64 efi_call(void *fp, ...);
 #define efi_call_phys(f, args...)		efi_call((f), args)
 
 /*
- * struct efi_scratch - Scratch space used while switching to/from efi_mm
- * @phys_stack: stack used during EFI Mixed Mode
- * @prev_mm:    store/restore stolen mm_struct while switching to/from efi_mm
+ * Scratch space used for switching the pagetable in the EFI stub
  */
 struct efi_scratch {
-	u64			phys_stack;
-	struct mm_struct	*prev_mm;
+	u64	r15;
+	u64	prev_cr3;
+	pgd_t	*efi_pgt;
+	bool	use_pgd;
+	u64	phys_stack;
 } __packed;
 
 #define arch_efi_call_virt_setup()					\
@@ -86,8 +86,11 @@ struct efi_scratch {
 	__kernel_fpu_begin();						\
 	firmware_restrict_branch_speculation_start();			\
 									\
-	if (!efi_enabled(EFI_OLD_MEMMAP))				\
-		efi_switch_mm(&efi_mm);					\
+	if (efi_scratch.use_pgd) {					\
+		efi_scratch.prev_cr3 = __read_cr3();			\
+		write_cr3((unsigned long)efi_scratch.efi_pgt);		\
+		__flush_tlb_all();					\
+	}								\
 })
 
 #define arch_efi_call_virt(p, f, args...)				\
@@ -95,8 +98,10 @@ struct efi_scratch {
 
 #define arch_efi_call_virt_teardown()					\
 ({									\
-	if (!efi_enabled(EFI_OLD_MEMMAP))				\
-		efi_switch_mm(efi_scratch.prev_mm);			\
+	if (efi_scratch.use_pgd) {					\
+		write_cr3(efi_scratch.prev_cr3);			\
+		__flush_tlb_all();					\
+	}								\
 									\
 	firmware_restrict_branch_speculation_end();			\
 	__kernel_fpu_end();						\
@@ -139,7 +144,6 @@ extern void __init efi_dump_pagetable(void);
 extern void __init efi_apply_memmap_quirks(void);
 extern int __init efi_reuse_config(u64 tables, int nr_tables);
 extern void efi_delete_dummy_variable(void);
-extern void efi_switch_mm(struct mm_struct *mm);
 
 struct efi_setup_data {
 	u64 fw_vendor;

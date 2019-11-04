@@ -1,7 +1,7 @@
 /*
  * HDMI Connector driver
  *
- * Copyright (C) 2013 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2013 Texas Instruments
  * Author: Tomi Valkeinen <tomi.valkeinen@ti.com>
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -55,7 +55,7 @@ struct panel_drv_data {
 static int hdmic_connect(struct omap_dss_device *dssdev)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
-	struct omap_dss_device *in;
+	struct omap_dss_device *in = ddata->in;
 	int r;
 
 	dev_dbg(ddata->dev, "connect\n");
@@ -63,19 +63,10 @@ static int hdmic_connect(struct omap_dss_device *dssdev)
 	if (omapdss_device_is_connected(dssdev))
 		return 0;
 
-	in = omapdss_of_find_source_for_first_ep(ddata->dev->of_node);
-	if (IS_ERR(in)) {
-		dev_err(ddata->dev, "failed to find video source\n");
-		return PTR_ERR(in);
-	}
-
 	r = in->ops.hdmi->connect(in, dssdev);
-	if (r) {
-		omap_dss_put_device(in);
+	if (r)
 		return r;
-	}
 
-	ddata->in = in;
 	return 0;
 }
 
@@ -90,9 +81,6 @@ static void hdmic_disconnect(struct omap_dss_device *dssdev)
 		return;
 
 	in->ops.hdmi->disconnect(in, dssdev);
-
-	omap_dss_put_device(in);
-	ddata->in = NULL;
 }
 
 static int hdmic_enable(struct omap_dss_device *dssdev)
@@ -177,15 +165,11 @@ static bool hdmic_detect(struct omap_dss_device *dssdev)
 {
 	struct panel_drv_data *ddata = to_panel_data(dssdev);
 	struct omap_dss_device *in = ddata->in;
-	bool connected;
 
 	if (gpio_is_valid(ddata->hpd_gpio))
-		connected = gpio_get_value_cansleep(ddata->hpd_gpio);
+		return gpio_get_value_cansleep(ddata->hpd_gpio);
 	else
-		connected = in->ops.hdmi->detect(in);
-	if (!connected && in->ops.hdmi->lost_hotplug)
-		in->ops.hdmi->lost_hotplug(in);
-	return connected;
+		return in->ops.hdmi->detect(in);
 }
 
 static int hdmic_register_hpd_cb(struct omap_dss_device *dssdev,
@@ -314,6 +298,7 @@ static int hdmic_probe_of(struct platform_device *pdev)
 {
 	struct panel_drv_data *ddata = platform_get_drvdata(pdev);
 	struct device_node *node = pdev->dev.of_node;
+	struct omap_dss_device *in;
 	int gpio;
 
 	/* HPD GPIO */
@@ -322,6 +307,14 @@ static int hdmic_probe_of(struct platform_device *pdev)
 		ddata->hpd_gpio = gpio;
 	else
 		ddata->hpd_gpio = -ENODEV;
+
+	in = omapdss_of_find_source_for_first_ep(node);
+	if (IS_ERR(in)) {
+		dev_err(&pdev->dev, "failed to find video source\n");
+		return PTR_ERR(in);
+	}
+
+	ddata->in = in;
 
 	return 0;
 }
@@ -339,6 +332,9 @@ static int hdmic_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, ddata);
 	ddata->dev = &pdev->dev;
 
+	if (!pdev->dev.of_node)
+		return -ENODEV;
+
 	r = hdmic_probe_of(pdev);
 	if (r)
 		return r;
@@ -349,7 +345,7 @@ static int hdmic_probe(struct platform_device *pdev)
 		r = devm_gpio_request_one(&pdev->dev, ddata->hpd_gpio,
 				GPIOF_DIR_IN, "hdmi_hpd");
 		if (r)
-			return r;
+			goto err_reg;
 
 		r = devm_request_threaded_irq(&pdev->dev,
 				gpio_to_irq(ddata->hpd_gpio),
@@ -358,7 +354,7 @@ static int hdmic_probe(struct platform_device *pdev)
 				IRQF_ONESHOT,
 				"hdmic hpd", ddata);
 		if (r)
-			return r;
+			goto err_reg;
 	}
 
 	ddata->vm = hdmic_default_vm;
@@ -373,21 +369,27 @@ static int hdmic_probe(struct platform_device *pdev)
 	r = omapdss_register_display(dssdev);
 	if (r) {
 		dev_err(&pdev->dev, "Failed to register panel\n");
-		return r;
+		goto err_reg;
 	}
 
 	return 0;
+err_reg:
+	omap_dss_put_device(ddata->in);
+	return r;
 }
 
 static int __exit hdmic_remove(struct platform_device *pdev)
 {
 	struct panel_drv_data *ddata = platform_get_drvdata(pdev);
 	struct omap_dss_device *dssdev = &ddata->dssdev;
+	struct omap_dss_device *in = ddata->in;
 
 	omapdss_unregister_display(&ddata->dssdev);
 
 	hdmic_disable(dssdev);
 	hdmic_disconnect(dssdev);
+
+	omap_dss_put_device(in);
 
 	return 0;
 }

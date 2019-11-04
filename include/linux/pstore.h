@@ -71,7 +71,7 @@ struct pstore_record {
 	struct pstore_info	*psi;
 	enum pstore_type_id	type;
 	u64			id;
-	struct timespec64	time;
+	struct timespec		time;
 	char			*buf;
 	ssize_t			size;
 	ssize_t			ecc_notice_size;
@@ -90,10 +90,7 @@ struct pstore_record {
  *
  * @buf_lock:	spinlock to serialize access to @buf
  * @buf:	preallocated crash dump buffer
- * @bufsize:	size of @buf available for crash dump bytes (must match
- *		smallest number of bytes available for writing to a
- *		backend entry, since compressed bytes don't take kindly
- *		to being truncated)
+ * @bufsize:	size of @buf available for crash dump writes
  *
  * @read_mutex:	serializes @open, @read, @close, and @erase callbacks
  * @flags:	bitfield of frontends the backend can accept writes for

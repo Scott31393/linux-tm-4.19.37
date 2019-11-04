@@ -192,7 +192,7 @@ static int pkcs1pad_encrypt_sign_complete(struct akcipher_request *req, int err)
 	if (likely(!pad_len))
 		goto out;
 
-	out_buf = kzalloc(ctx->key_size, GFP_KERNEL);
+	out_buf = kzalloc(ctx->key_size, GFP_ATOMIC);
 	err = -ENOMEM;
 	if (!out_buf)
 		goto out;
@@ -279,7 +279,9 @@ static int pkcs1pad_encrypt(struct akcipher_request *req)
 				   req->dst, ctx->key_size - 1, req->dst_len);
 
 	err = crypto_akcipher_encrypt(&req_ctx->child_req);
-	if (err != -EINPROGRESS && err != -EBUSY)
+	if (err != -EINPROGRESS &&
+			(err != -EBUSY ||
+			 !(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG)))
 		return pkcs1pad_encrypt_sign_complete(req, err);
 
 	return err;
@@ -381,7 +383,9 @@ static int pkcs1pad_decrypt(struct akcipher_request *req)
 				   ctx->key_size);
 
 	err = crypto_akcipher_decrypt(&req_ctx->child_req);
-	if (err != -EINPROGRESS && err != -EBUSY)
+	if (err != -EINPROGRESS &&
+			(err != -EBUSY ||
+			 !(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG)))
 		return pkcs1pad_decrypt_complete(req, err);
 
 	return err;
@@ -436,7 +440,9 @@ static int pkcs1pad_sign(struct akcipher_request *req)
 				   req->dst, ctx->key_size - 1, req->dst_len);
 
 	err = crypto_akcipher_sign(&req_ctx->child_req);
-	if (err != -EINPROGRESS && err != -EBUSY)
+	if (err != -EINPROGRESS &&
+			(err != -EBUSY ||
+			 !(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG)))
 		return pkcs1pad_encrypt_sign_complete(req, err);
 
 	return err;
@@ -555,7 +561,9 @@ static int pkcs1pad_verify(struct akcipher_request *req)
 				   ctx->key_size);
 
 	err = crypto_akcipher_verify(&req_ctx->child_req);
-	if (err != -EINPROGRESS && err != -EBUSY)
+	if (err != -EINPROGRESS &&
+			(err != -EBUSY ||
+			 !(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG)))
 		return pkcs1pad_verify_complete(req, err);
 
 	return err;

@@ -322,10 +322,10 @@ static int ioat_dma_self_test(struct ioatdma_device *ioat_dma)
 	unsigned long tmo;
 	unsigned long flags;
 
-	src = kzalloc(IOAT_TEST_SIZE, GFP_KERNEL);
+	src = kzalloc(sizeof(u8) * IOAT_TEST_SIZE, GFP_KERNEL);
 	if (!src)
 		return -ENOMEM;
-	dest = kzalloc(IOAT_TEST_SIZE, GFP_KERNEL);
+	dest = kzalloc(sizeof(u8) * IOAT_TEST_SIZE, GFP_KERNEL);
 	if (!dest) {
 		kfree(src);
 		return -ENOMEM;
@@ -760,7 +760,7 @@ ioat_init_channel(struct ioatdma_device *ioat_dma,
 	dma_cookie_init(&ioat_chan->dma_chan);
 	list_add_tail(&ioat_chan->dma_chan.device_node, &dma->channels);
 	ioat_dma->idx[idx] = ioat_chan;
-	timer_setup(&ioat_chan->timer, ioat_timer_event, 0);
+	setup_timer(&ioat_chan->timer, ioat_timer_event, data);
 	tasklet_init(&ioat_chan->cleanup_task, ioat_cleanup_event, data);
 }
 
@@ -1205,15 +1205,8 @@ static void ioat_shutdown(struct pci_dev *pdev)
 
 		spin_lock_bh(&ioat_chan->prep_lock);
 		set_bit(IOAT_CHAN_DOWN, &ioat_chan->state);
-		spin_unlock_bh(&ioat_chan->prep_lock);
-		/*
-		 * Synchronization rule for del_timer_sync():
-		 *  - The caller must not hold locks which would prevent
-		 *    completion of the timer's handler.
-		 * So prep_lock cannot be held before calling it.
-		 */
 		del_timer_sync(&ioat_chan->timer);
-
+		spin_unlock_bh(&ioat_chan->prep_lock);
 		/* this should quiesce then reset */
 		ioat_reset_hw(ioat_chan);
 	}

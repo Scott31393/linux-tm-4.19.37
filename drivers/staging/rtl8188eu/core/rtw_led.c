@@ -1,7 +1,16 @@
-// SPDX-License-Identifier: GPL-2.0
 /******************************************************************************
  *
  * Copyright(c) 2007 - 2012 Realtek Corporation. All rights reserved.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of version 2 of the GNU General Public License as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
  *
  ******************************************************************************/
 
@@ -13,9 +22,9 @@
 /*		Callback function of LED BlinkTimer, */
 /*		it just schedules to corresponding BlinkWorkItem/led_blink_hdl */
 /*  */
-static void BlinkTimerCallback(struct timer_list *t)
+void BlinkTimerCallback(unsigned long data)
 {
-	struct LED_871x *pLed = from_timer(pLed, t, BlinkTimer);
+	struct LED_871x *pLed = (struct LED_871x *)data;
 	struct adapter *padapter = pLed->padapter;
 
 	if ((padapter->bSurpriseRemoved) || (padapter->bDriverStopped))
@@ -64,10 +73,12 @@ void InitLed871x(struct adapter *padapter, struct LED_871x *pLed)
 
 	ResetLedStatus(pLed);
 
-	timer_setup(&pLed->BlinkTimer, BlinkTimerCallback, 0);
+	setup_timer(&pLed->BlinkTimer, BlinkTimerCallback,
+		    (unsigned long)pLed);
 
 	INIT_WORK(&pLed->BlinkWorkItem, BlinkWorkItemCallback);
 }
+
 
 /*  */
 /*	Description: */

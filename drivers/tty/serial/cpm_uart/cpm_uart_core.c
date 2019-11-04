@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  *  Driver for CPM (SCC/SMC) serial ports; core driver
  *
@@ -13,6 +12,21 @@
  *            (C) 2004 Intracom, S.A.
  *            (C) 2005-2006 MontaVista Software, Inc.
  *		Vitaly Bordug <vbordug@ru.mvista.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *
  */
 
 #include <linux/module.h>
@@ -1054,8 +1068,8 @@ static int poll_wait_key(char *obuf, struct uart_cpm_port *pinfo)
 	/* Get the address of the host memory buffer.
 	 */
 	bdp = pinfo->rx_cur;
-	if (bdp->cbd_sc & BD_SC_EMPTY)
-		return NO_POLL_CHAR;
+	while (bdp->cbd_sc & BD_SC_EMPTY)
+		;
 
 	/* If the buffer address is in the CPM DPRAM, don't
 	 * convert it.
@@ -1090,11 +1104,7 @@ static int cpm_get_poll_char(struct uart_port *port)
 		poll_chars = 0;
 	}
 	if (poll_chars <= 0) {
-		int ret = poll_wait_key(poll_buf, pinfo);
-
-		if (ret == NO_POLL_CHAR)
-			return ret;
-		poll_chars = ret;
+		poll_chars = poll_wait_key(poll_buf, pinfo);
 		pollp = poll_buf;
 	}
 	poll_chars--;

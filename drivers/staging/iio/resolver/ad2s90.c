@@ -48,6 +48,7 @@ error_ret:
 
 static const struct iio_info ad2s90_info = {
 	.read_raw = ad2s90_read_raw,
+	.driver_module = THIS_MODULE,
 };
 
 static const struct iio_chan_spec ad2s90_chan = {
@@ -85,12 +86,7 @@ static int ad2s90_probe(struct spi_device *spi)
 	/* need 600ns between CS and the first falling edge of SCLK */
 	spi->max_speed_hz = 830000;
 	spi->mode = SPI_MODE_3;
-	ret = spi_setup(spi);
-
-	if (ret < 0) {
-		dev_err(&spi->dev, "spi_setup failed!\n");
-		return ret;
-	}
+	spi_setup(spi);
 
 	return 0;
 }

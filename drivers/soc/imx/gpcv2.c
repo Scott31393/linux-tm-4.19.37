@@ -39,15 +39,10 @@
 
 #define GPC_M4_PU_PDN_FLG		0x1bc
 
-/*
- * The PGC offset values in Reference Manual
- * (Rev. 1, 01/2018 and the older ones) GPC chapter's
- * GPC_PGC memory map are incorrect, below offset
- * values are from design RTL.
- */
-#define PGC_MIPI			16
-#define PGC_PCIE			17
-#define PGC_USB_HSIC			20
+
+#define PGC_MIPI			4
+#define PGC_PCIE			5
+#define PGC_USB_HSIC			8
 #define GPC_PGC_CTRL(n)			(0x800 + (n) * 0x40)
 #define GPC_PGC_SR(n)			(GPC_PGC_CTRL(n) + 0xc)
 

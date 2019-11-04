@@ -10,12 +10,13 @@
 
 #include <linux/bug.h>
 #include <linux/kernel.h>
+#include <linux/sys_soc.h>
 
 #include <dt-bindings/power/r8a77995-sysc.h>
 
 #include "rcar-sysc.h"
 
-static const struct rcar_sysc_area r8a77995_areas[] __initconst = {
+static struct rcar_sysc_area r8a77995_areas[] __initdata = {
 	{ "always-on",     0, 0, R8A77995_PD_ALWAYS_ON, -1, PD_ALWAYS_ON },
 	{ "ca53-scu",  0x140, 0, R8A77995_PD_CA53_SCU,  R8A77995_PD_ALWAYS_ON,
 	  PD_SCU },

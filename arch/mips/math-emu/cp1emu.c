@@ -451,7 +451,7 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 					regs->cp0_epc + dec_insn.pc_inc +
 					dec_insn.next_pc_inc;
 			}
-			/* fall through */
+			/* Fall through */
 		case jr_op:
 			/* For R6, JR already emulated in jalr_op */
 			if (NO_R6EMU && insn.r_format.func == jr_op)
@@ -471,11 +471,10 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			regs->regs[31] = regs->cp0_epc +
 				dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
-			/* fall through */
+			/* Fall through */
 		case bltzl_op:
 			if (NO_R6EMU)
 				break;
-			/* fall through */
 		case bltz_op:
 			if ((long)regs->regs[insn.i_format.rs] < 0)
 				*contpc = regs->cp0_epc +
@@ -495,11 +494,10 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 			regs->regs[31] = regs->cp0_epc +
 				dec_insn.pc_inc +
 				dec_insn.next_pc_inc;
-			/* fall through */
+			/* Fall through */
 		case bgezl_op:
 			if (NO_R6EMU)
 				break;
-			/* fall through */
 		case bgez_op:
 			if ((long)regs->regs[insn.i_format.rs] >= 0)
 				*contpc = regs->cp0_epc +
@@ -514,12 +512,11 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 		break;
 	case jalx_op:
 		set_isa16_mode(bit);
-		/* fall through */
 	case jal_op:
 		regs->regs[31] = regs->cp0_epc +
 			dec_insn.pc_inc +
 			dec_insn.next_pc_inc;
-		/* fall through */
+		/* Fall through */
 	case j_op:
 		*contpc = regs->cp0_epc + dec_insn.pc_inc;
 		*contpc >>= 28;
@@ -531,7 +528,6 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 	case beql_op:
 		if (NO_R6EMU)
 			break;
-		/* fall through */
 	case beq_op:
 		if (regs->regs[insn.i_format.rs] ==
 		    regs->regs[insn.i_format.rt])
@@ -546,7 +542,6 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 	case bnel_op:
 		if (NO_R6EMU)
 			break;
-		/* fall through */
 	case bne_op:
 		if (regs->regs[insn.i_format.rs] !=
 		    regs->regs[insn.i_format.rt])
@@ -561,7 +556,6 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 	case blezl_op:
 		if (!insn.i_format.rt && NO_R6EMU)
 			break;
-		/* fall through */
 	case blez_op:
 
 		/*
@@ -599,7 +593,6 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 	case bgtzl_op:
 		if (!insn.i_format.rt && NO_R6EMU)
 			break;
-		/* fall through */
 	case bgtz_op:
 		/*
 		 * Compact branches for R6 for the
@@ -736,8 +729,7 @@ int isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
 
 			return 1;
 		}
-		/* R2/R6 compatible cop1 instruction */
-		/* fall through */
+		/* R2/R6 compatible cop1 instruction. Fall through */
 	case cop2_op:
 	case cop1x_op:
 		if (insn.i_format.rs == bc_op) {
@@ -818,7 +810,7 @@ do {									\
 #define SITOREG(si, x)							\
 do {									\
 	if (cop1_64bit(xcp) && !hybrid_fprs()) {			\
-		unsigned int i;						\
+		unsigned i;						\
 		set_fpr32(&ctx->fpr[x], 0, si);				\
 		for (i = 1; i < ARRAY_SIZE(ctx->fpr[x].val32); i++)	\
 			set_fpr32(&ctx->fpr[x], i, 0);			\
@@ -831,7 +823,7 @@ do {									\
 
 #define SITOHREG(si, x)							\
 do {									\
-	unsigned int i;							\
+	unsigned i;							\
 	set_fpr32(&ctx->fpr[x], 1, si);					\
 	for (i = 2; i < ARRAY_SIZE(ctx->fpr[x].val32); i++)		\
 		set_fpr32(&ctx->fpr[x], i, 0);				\
@@ -842,7 +834,7 @@ do {									\
 
 #define DITOREG(di, x)							\
 do {									\
-	unsigned int fpr, i;						\
+	unsigned fpr, i;						\
 	fpr = (x) & ~(cop1_64bit(xcp) ^ 1);				\
 	set_fpr64(&ctx->fpr[fpr], 0, di);				\
 	for (i = 1; i < ARRAY_SIZE(ctx->fpr[x].val64); i++)		\
@@ -1198,8 +1190,7 @@ emul:
 			if (!cpu_has_mips_r6 || delay_slot(xcp))
 				return SIGILL;
 
-			likely = 0;
-			cond = 0;
+			cond = likely = 0;
 			fpr = &current->thread.fpu.fpr[MIPSInst_RT(ir)];
 			bit0 = get_fpr32(fpr, 0) & 0x1;
 			switch (MIPSInst_RS(ir)) {
@@ -1229,14 +1220,14 @@ emul:
 			case bcfl_op:
 				if (cpu_has_mips_2_3_4_5_r)
 					likely = 1;
-				/* fall through */
+				/* Fall through */
 			case bcf_op:
 				cond = !cond;
 				break;
 			case bctl_op:
 				if (cpu_has_mips_2_3_4_5_r)
 					likely = 1;
-				/* fall through */
+				/* Fall through */
 			case bct_op:
 				break;
 			}
@@ -1362,8 +1353,7 @@ branch_common:
 				return SIGILL;
 
 			/* a real fpu computation instruction */
-			sig = fpu_emu(xcp, ctx, ir);
-			if (sig)
+			if ((sig = fpu_emu(xcp, ctx, ir)))
 				return sig;
 		}
 		break;
@@ -1475,7 +1465,7 @@ DEF3OP(nmsub, dp, ieee754dp_mul, ieee754dp_sub, ieee754dp_neg);
 static int fpux_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 	mips_instruction ir, void __user **fault_addr)
 {
-	unsigned int rcsr = 0;	/* resulting csr */
+	unsigned rcsr = 0;	/* resulting csr */
 
 	MIPS_FPU_EMU_INC_STATS(cp1xops);
 
@@ -1671,10 +1661,10 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
 	mips_instruction ir)
 {
 	int rfmt;		/* resulting format */
-	unsigned int rcsr = 0;	/* resulting csr */
+	unsigned rcsr = 0;	/* resulting csr */
 	unsigned int oldrm;
 	unsigned int cbit;
-	unsigned int cond;
+	unsigned cond;
 	union {
 		union ieee754dp d;
 		union ieee754sp s;
@@ -2039,10 +2029,9 @@ copcsr:
 
 		default:
 			if (!NO_R6EMU && MIPSInst_FUNC(ir) >= fcmp_op) {
-				unsigned int cmpop;
+				unsigned cmpop = MIPSInst_FUNC(ir) - fcmp_op;
 				union ieee754sp fs, ft;
 
-				cmpop = MIPSInst_FUNC(ir) - fcmp_op;
 				SPFROMREG(fs, MIPSInst_FS(ir));
 				SPFROMREG(ft, MIPSInst_FT(ir));
 				rv.w = ieee754sp_cmp(fs, ft,
@@ -2390,10 +2379,9 @@ dcopuop:
 
 		default:
 			if (!NO_R6EMU && MIPSInst_FUNC(ir) >= fcmp_op) {
-				unsigned int cmpop;
+				unsigned cmpop = MIPSInst_FUNC(ir) - fcmp_op;
 				union ieee754dp fs, ft;
 
-				cmpop = MIPSInst_FUNC(ir) - fcmp_op;
 				DPFROMREG(fs, MIPSInst_FS(ir));
 				DPFROMREG(ft, MIPSInst_FT(ir));
 				rv.w = ieee754dp_cmp(fs, ft,

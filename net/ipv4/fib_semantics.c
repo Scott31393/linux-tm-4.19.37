@@ -171,7 +171,7 @@ static void free_nh_exceptions(struct fib_nh *nh)
 		fnhe = rcu_dereference_protected(hash[i].chain, 1);
 		while (fnhe) {
 			struct fib_nh_exception *next;
-
+			
 			next = rcu_dereference_protected(fnhe->fnhe_next, 1);
 
 			rt_fibinfo_free(&fnhe->fnhe_rth_input);
@@ -601,9 +601,17 @@ static void fib_rebalance(struct fib_info *fi)
 		atomic_set(&nexthop_nh->nh_upper_bound, upper_bound);
 	} endfor_nexthops(fi);
 }
+
+static inline void fib_add_weight(struct fib_info *fi,
+				  const struct fib_nh *nh)
+{
+	fi->fib_weight += nh->nh_weight;
+}
+
 #else /* CONFIG_IP_ROUTE_MULTIPATH */
 
 #define fib_rebalance(fi) do { } while (0)
+#define fib_add_weight(fi, nh) do { } while (0)
 
 #endif /* CONFIG_IP_ROUTE_MULTIPATH */
 
@@ -715,7 +723,7 @@ bool fib_metrics_match(struct fib_config *cfg, struct fib_info *fi)
 			bool ecn_ca = false;
 
 			nla_strlcpy(tmp, nla, sizeof(tmp));
-			val = tcp_ca_get_key_by_name(fi->fib_net, tmp, &ecn_ca);
+			val = tcp_ca_get_key_by_name(tmp, &ecn_ca);
 		} else {
 			if (nla_len(nla) != sizeof(u32))
 				return false;
@@ -777,8 +785,8 @@ bool fib_metrics_match(struct fib_config *cfg, struct fib_info *fi)
  *					|
  *					|-> {local prefix} (terminal node)
  */
-static int fib_check_nh(struct fib_config *cfg, struct fib_nh *nh,
-			struct netlink_ext_ack *extack)
+static int fib_check_nh(struct fib_config *cfg, struct fib_info *fi,
+			struct fib_nh *nh, struct netlink_ext_ack *extack)
 {
 	int err = 0;
 	struct net *net;
@@ -1021,8 +1029,49 @@ static bool fib_valid_prefsrc(struct fib_config *cfg, __be32 fib_prefsrc)
 static int
 fib_convert_metrics(struct fib_info *fi, const struct fib_config *cfg)
 {
-	return ip_metrics_convert(fi->fib_net, cfg->fc_mx, cfg->fc_mx_len,
-				  fi->fib_metrics->metrics);
+	bool ecn_ca = false;
+	struct nlattr *nla;
+	int remaining;
+
+	if (!cfg->fc_mx)
+		return 0;
+
+	nla_for_each_attr(nla, cfg->fc_mx, cfg->fc_mx_len, remaining) {
+		int type = nla_type(nla);
+		u32 val;
+
+		if (!type)
+			continue;
+		if (type > RTAX_MAX)
+			return -EINVAL;
+
+		if (type == RTAX_CC_ALGO) {
+			char tmp[TCP_CA_NAME_MAX];
+
+			nla_strlcpy(tmp, nla, sizeof(tmp));
+			val = tcp_ca_get_key_by_name(tmp, &ecn_ca);
+			if (val == TCP_CA_UNSPEC)
+				return -EINVAL;
+		} else {
+			if (nla_len(nla) != sizeof(u32))
+				return -EINVAL;
+			val = nla_get_u32(nla);
+		}
+		if (type == RTAX_ADVMSS && val > 65535 - 40)
+			val = 65535 - 40;
+		if (type == RTAX_MTU && val > 65535 - 15)
+			val = 65535 - 15;
+		if (type == RTAX_HOPLIMIT && val > 255)
+			val = 255;
+		if (type == RTAX_FEATURES && (val & ~RTAX_FEATURE_MASK))
+			return -EINVAL;
+		fi->fib_metrics->metrics[type - 1] = val;
+	}
+
+	if (ecn_ca)
+		fi->fib_metrics->metrics[RTAX_FEATURES - 1] |= DST_FEATURE_ECN_CA;
+
+	return 0;
 }
 
 struct fib_info *fib_create_info(struct fib_config *cfg,
@@ -1222,7 +1271,7 @@ struct fib_info *fib_create_info(struct fib_config *cfg,
 		int linkdown = 0;
 
 		change_nexthops(fi) {
-			err = fib_check_nh(cfg, nexthop_nh, extack);
+			err = fib_check_nh(cfg, fi, nexthop_nh, extack);
 			if (err != 0)
 				goto failure;
 			if (nexthop_nh->nh_flags & RTNH_F_LINKDOWN)
@@ -1239,6 +1288,7 @@ struct fib_info *fib_create_info(struct fib_config *cfg,
 
 	change_nexthops(fi) {
 		fib_info_update_nh_saddr(net, nexthop_nh);
+		fib_add_weight(fi, nexthop_nh);
 	} endfor_nexthops(fi)
 
 	fib_rebalance(fi);
@@ -1468,56 +1518,6 @@ static int call_fib_nh_notifiers(struct fib_nh *fib_nh,
 	}
 
 	return NOTIFY_DONE;
-}
-
-/* Update the PMTU of exceptions when:
- * - the new MTU of the first hop becomes smaller than the PMTU
- * - the old MTU was the same as the PMTU, and it limited discovery of
- *   larger MTUs on the path. With that limit raised, we can now
- *   discover larger MTUs
- * A special case is locked exceptions, for which the PMTU is smaller
- * than the minimal accepted PMTU:
- * - if the new MTU is greater than the PMTU, don't make any change
- * - otherwise, unlock and set PMTU
- */
-static void nh_update_mtu(struct fib_nh *nh, u32 new, u32 orig)
-{
-	struct fnhe_hash_bucket *bucket;
-	int i;
-
-	bucket = rcu_dereference_protected(nh->nh_exceptions, 1);
-	if (!bucket)
-		return;
-
-	for (i = 0; i < FNHE_HASH_SIZE; i++) {
-		struct fib_nh_exception *fnhe;
-
-		for (fnhe = rcu_dereference_protected(bucket[i].chain, 1);
-		     fnhe;
-		     fnhe = rcu_dereference_protected(fnhe->fnhe_next, 1)) {
-			if (fnhe->fnhe_mtu_locked) {
-				if (new <= fnhe->fnhe_pmtu) {
-					fnhe->fnhe_pmtu = new;
-					fnhe->fnhe_mtu_locked = false;
-				}
-			} else if (new < fnhe->fnhe_pmtu ||
-				   orig == fnhe->fnhe_pmtu) {
-				fnhe->fnhe_pmtu = new;
-			}
-		}
-	}
-}
-
-void fib_sync_mtu(struct net_device *dev, u32 orig_mtu)
-{
-	unsigned int hash = fib_devindex_hashfn(dev->ifindex);
-	struct hlist_head *head = &fib_info_devhash[hash];
-	struct fib_nh *nh;
-
-	hlist_for_each_entry(nh, head, nh_hash) {
-		if (nh->nh_dev == dev)
-			nh_update_mtu(nh, dev->mtu, orig_mtu);
-	}
 }
 
 /* Event              force Flags           Description
@@ -1780,12 +1780,14 @@ void fib_select_multipath(struct fib_result *res, int hash)
 void fib_select_path(struct net *net, struct fib_result *res,
 		     struct flowi4 *fl4, const struct sk_buff *skb)
 {
-	if (fl4->flowi4_oif && !(fl4->flowi4_flags & FLOWI_FLAG_SKIP_NH_OIF))
-		goto check_saddr;
+	bool oif_check;
+
+	oif_check = (fl4->flowi4_oif == 0 ||
+		     fl4->flowi4_flags & FLOWI_FLAG_SKIP_NH_OIF);
 
 #ifdef CONFIG_IP_ROUTE_MULTIPATH
-	if (res->fi->fib_nhs > 1) {
-		int h = fib_multipath_hash(net, fl4, skb, NULL);
+	if (res->fi->fib_nhs > 1 && oif_check) {
+		int h = fib_multipath_hash(res->fi, fl4, skb);
 
 		fib_select_multipath(res, h);
 	}
@@ -1793,10 +1795,10 @@ void fib_select_path(struct net *net, struct fib_result *res,
 #endif
 	if (!res->prefixlen &&
 	    res->table->tb_num_default > 1 &&
-	    res->type == RTN_UNICAST)
+	    res->type == RTN_UNICAST && oif_check)
 		fib_select_default(fl4, res);
 
-check_saddr:
 	if (!fl4->saddr)
 		fl4->saddr = FIB_RES_PREFSRC(net, *res);
 }
+EXPORT_SYMBOL_GPL(fib_select_path);

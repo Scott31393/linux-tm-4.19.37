@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * USB Attached SCSI
  * Note that this is not the same as the USB Mass Storage driver
@@ -6,6 +5,8 @@
  * Copyright Hans de Goede <hdegoede@redhat.com> for Red Hat, Inc. 2013 - 2016
  * Copyright Matthew Wilcox for Intel Corp, 2010
  * Copyright Sarah Sharp for Intel Corp, 2010
+ *
+ * Distributed under the terms of the GNU GPL, version two.
  */
 
 #include <linux/blkdev.h>
@@ -667,7 +668,6 @@ static int uas_queuecommand_lck(struct scsi_cmnd *cmnd,
 		break;
 	case DMA_BIDIRECTIONAL:
 		cmdinfo->state |= ALLOC_DATA_IN_URB | SUBMIT_DATA_IN_URB;
-		/* fall through */
 	case DMA_TO_DEVICE:
 		cmdinfo->state |= ALLOC_DATA_OUT_URB | SUBMIT_DATA_OUT_URB;
 	case DMA_NONE:
@@ -842,27 +842,6 @@ static int uas_slave_configure(struct scsi_device *sdev)
 		sdev->skip_ms_page_8 = 1;
 		sdev->wce_default_on = 1;
 	}
-
-	/*
-	 * Some disks return the total number of blocks in response
-	 * to READ CAPACITY rather than the highest block number.
-	 * If this device makes that mistake, tell the sd driver.
-	 */
-	if (devinfo->flags & US_FL_FIX_CAPACITY)
-		sdev->fix_capacity = 1;
-
-	/*
-	 * Some devices don't like MODE SENSE with page=0x3f,
-	 * which is the command used for checking if a device
-	 * is write-protected.  Now that we tell the sd driver
-	 * to do a 192-byte transfer with this command the
-	 * majority of devices work fine, but a few still can't
-	 * handle it.  The sd driver will simply assume those
-	 * devices are write-enabled.
-	 */
-	if (devinfo->flags & US_FL_NO_WP_DETECT)
-		sdev->skip_ms_page_3f = 1;
-
 	scsi_change_queue_depth(sdev, devinfo->qdepth - 2);
 	return 0;
 }

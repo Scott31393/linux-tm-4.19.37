@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0+
 /*
  * Copyright (C) 2009 by Bart Hartgers (bart.hartgers+ark3116@gmail.com)
  * Original version:
@@ -16,6 +15,11 @@
  * into the old ark3116.c driver and suddenly realized the ark3116 is
  * a 16450 with a USB interface glued to it. See comments at the
  * bottom of this file.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the
+ * Free Software Foundation; either version 2 of the License, or (at your
+ * option) any later version.
  */
 
 #include <linux/kernel.h>
@@ -83,10 +87,7 @@ static int ark3116_write_reg(struct usb_serial *serial,
 				 usb_sndctrlpipe(serial->dev, 0),
 				 0xfe, 0x40, val, reg,
 				 NULL, 0, ARK_TIMEOUT);
-	if (result)
-		return result;
-
-	return 0;
+	return result;
 }
 
 static int ark3116_read_reg(struct usb_serial *serial,
@@ -108,7 +109,7 @@ static int ark3116_read_reg(struct usb_serial *serial,
 		return result;
 	}
 
-	return 0;
+	return buf[0];
 }
 
 static inline int calc_divisor(int bps)
@@ -358,13 +359,13 @@ static int ark3116_open(struct tty_struct *tty, struct usb_serial_port *port)
 
 	/* read modem status */
 	result = ark3116_read_reg(serial, UART_MSR, buf);
-	if (result)
+	if (result < 0)
 		goto err_close;
 	priv->msr = *buf;
 
 	/* read line status */
 	result = ark3116_read_reg(serial, UART_LSR, buf);
-	if (result)
+	if (result < 0)
 		goto err_close;
 	priv->lsr = *buf;
 
@@ -397,35 +398,31 @@ err_free:
 	return result;
 }
 
-static int ark3116_get_serial_info(struct usb_serial_port *port,
-			struct serial_struct __user *retinfo)
-{
-	struct serial_struct tmp;
-
-	memset(&tmp, 0, sizeof(tmp));
-
-	tmp.type = PORT_16654;
-	tmp.line = port->minor;
-	tmp.port = port->port_number;
-	tmp.baud_base = 460800;
-
-	if (copy_to_user(retinfo, &tmp, sizeof(tmp)))
-		return -EFAULT;
-
-	return 0;
-}
-
 static int ark3116_ioctl(struct tty_struct *tty,
 			 unsigned int cmd, unsigned long arg)
 {
 	struct usb_serial_port *port = tty->driver_data;
+	struct serial_struct serstruct;
 	void __user *user_arg = (void __user *)arg;
 
 	switch (cmd) {
 	case TIOCGSERIAL:
-		return ark3116_get_serial_info(port, user_arg);
-	default:
-		break;
+		/* XXX: Some of these values are probably wrong. */
+		memset(&serstruct, 0, sizeof(serstruct));
+		serstruct.type = PORT_16654;
+		serstruct.line = port->minor;
+		serstruct.port = port->port_number;
+		serstruct.custom_divisor = 0;
+		serstruct.baud_base = 460800;
+
+		if (copy_to_user(user_arg, &serstruct, sizeof(serstruct)))
+			return -EFAULT;
+
+		return 0;
+	case TIOCSSERIAL:
+		if (copy_from_user(&serstruct, user_arg, sizeof(serstruct)))
+			return -EFAULT;
+		return 0;
 	}
 
 	return -ENOIOCTLCMD;

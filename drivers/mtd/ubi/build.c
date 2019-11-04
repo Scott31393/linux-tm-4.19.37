@@ -526,7 +526,6 @@ void ubi_free_internal_volumes(struct ubi_device *ubi)
 	for (i = ubi->vtbl_slots;
 	     i < ubi->vtbl_slots + UBI_INT_VOL_COUNT; i++) {
 		ubi_eba_replace_table(ubi->volumes[i], NULL);
-		ubi_fastmap_destroy_checkmap(ubi->volumes[i]);
 		kfree(ubi->volumes[i]);
 	}
 }
@@ -536,17 +535,8 @@ static int get_bad_peb_limit(const struct ubi_device *ubi, int max_beb_per1024)
 	int limit, device_pebs;
 	uint64_t device_size;
 
-	if (!max_beb_per1024) {
-		/*
-		 * Since max_beb_per1024 has not been set by the user in either
-		 * the cmdline or Kconfig, use mtd_max_bad_blocks to set the
-		 * limit if it is supported by the device.
-		 */
-		limit = mtd_max_bad_blocks(ubi->mtd, 0, ubi->mtd->size);
-		if (limit < 0)
-			return 0;
-		return limit;
-	}
+	if (!max_beb_per1024)
+		return 0;
 
 	/*
 	 * Here we are using size of the entire flash chip and

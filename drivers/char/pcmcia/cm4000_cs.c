@@ -659,9 +659,9 @@ static void terminate_monitor(struct cm4000_dev *dev)
  * is already doing that for you.
  */
 
-static void monitor_card(struct timer_list *t)
+static void monitor_card(unsigned long p)
 {
-	struct cm4000_dev *dev = from_timer(dev, t, timer);
+	struct cm4000_dev *dev = (struct cm4000_dev *) p;
 	unsigned int iobase = dev->p_dev->resource[0]->start;
 	unsigned short s;
 	struct ptsreq ptsreq;
@@ -1374,7 +1374,7 @@ static void start_monitor(struct cm4000_dev *dev)
 	DEBUGP(3, dev, "-> start_monitor\n");
 	if (!dev->monitor_running) {
 		DEBUGP(5, dev, "create, init and add timer\n");
-		timer_setup(&dev->timer, monitor_card, 0);
+		setup_timer(&dev->timer, monitor_card, (unsigned long)dev);
 		dev->monitor_running = 1;
 		mod_timer(&dev->timer, jiffies);
 	} else
@@ -1748,6 +1748,8 @@ static int cm4000_config_check(struct pcmcia_device *p_dev, void *priv_data)
 
 static int cm4000_config(struct pcmcia_device * link, int devno)
 {
+	struct cm4000_dev *dev;
+
 	link->config_flags |= CONF_AUTO_SET_IO;
 
 	/* read the config-tuples */
@@ -1756,6 +1758,8 @@ static int cm4000_config(struct pcmcia_device * link, int devno)
 
 	if (pcmcia_enable_device(link))
 		goto cs_release;
+
+	dev = link->priv;
 
 	return 0;
 

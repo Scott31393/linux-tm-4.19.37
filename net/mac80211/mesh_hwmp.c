@@ -111,8 +111,8 @@ static int mesh_path_sel_frame_tx(enum mpath_frame_type action, u8 flags,
 	struct sk_buff *skb;
 	struct ieee80211_mgmt *mgmt;
 	u8 *pos, ie_len;
-	int hdr_len = offsetofend(struct ieee80211_mgmt,
-				  u.action.u.mesh_action);
+	int hdr_len = offsetof(struct ieee80211_mgmt, u.action.u.mesh_action) +
+		      sizeof(mgmt->u.action.u.mesh_action);
 
 	skb = dev_alloc_skb(local->tx_headroom +
 			    hdr_len +
@@ -242,8 +242,8 @@ int mesh_path_error_tx(struct ieee80211_sub_if_data *sdata,
 	struct ieee80211_if_mesh *ifmsh = &sdata->u.mesh;
 	struct ieee80211_mgmt *mgmt;
 	u8 *pos, ie_len;
-	int hdr_len = offsetofend(struct ieee80211_mgmt,
-				  u.action.u.mesh_action);
+	int hdr_len = offsetof(struct ieee80211_mgmt, u.action.u.mesh_action) +
+		      sizeof(mgmt->u.action.u.mesh_action);
 
 	if (time_before(jiffies, ifmsh->next_perr))
 		return -EAGAIN;
@@ -295,11 +295,14 @@ int mesh_path_error_tx(struct ieee80211_sub_if_data *sdata,
 }
 
 void ieee80211s_update_metric(struct ieee80211_local *local,
-			      struct sta_info *sta,
-			      struct ieee80211_tx_status *st)
+		struct sta_info *sta, struct sk_buff *skb)
 {
-	struct ieee80211_tx_info *txinfo = st->info;
+	struct ieee80211_tx_info *txinfo = IEEE80211_SKB_CB(skb);
+	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *) skb->data;
 	int failed;
+
+	if (!ieee80211_is_data(hdr->frame_control))
+		return;
 
 	failed = !(txinfo->flags & IEEE80211_TX_STAT_ACK);
 
@@ -569,10 +572,6 @@ static void hwmp_preq_frame_process(struct ieee80211_sub_if_data *sdata,
 		forward = false;
 		reply = true;
 		target_metric = 0;
-
-		if (SN_GT(target_sn, ifmsh->sn))
-			ifmsh->sn = target_sn;
-
 		if (time_after(jiffies, ifmsh->last_sn_update +
 					net_traversal_jiffies(sdata)) ||
 		    time_before(jiffies, ifmsh->last_sn_update)) {
@@ -1198,9 +1197,9 @@ endlookup:
 	return err;
 }
 
-void mesh_path_timer(struct timer_list *t)
+void mesh_path_timer(unsigned long data)
 {
-	struct mesh_path *mpath = from_timer(mpath, t, timer);
+	struct mesh_path *mpath = (void *) data;
 	struct ieee80211_sub_if_data *sdata = mpath->sdata;
 	int ret;
 
@@ -1251,7 +1250,6 @@ void mesh_path_tx_root_frame(struct ieee80211_sub_if_data *sdata)
 		break;
 	case IEEE80211_PROACTIVE_PREQ_WITH_PREP:
 		flags |= IEEE80211_PREQ_PROACTIVE_PREP_FLAG;
-		/* fall through */
 	case IEEE80211_PROACTIVE_PREQ_NO_PREP:
 		interval = ifmsh->mshcfg.dot11MeshHWMPactivePathToRootTimeout;
 		target_flags |= IEEE80211_PREQ_TO_FLAG |

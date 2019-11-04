@@ -59,9 +59,7 @@
  */
 
 static struct page_ext_operations *page_ext_ops[] = {
-#ifdef CONFIG_DEBUG_PAGEALLOC
 	&debug_guardpage_ops,
-#endif
 #ifdef CONFIG_PAGE_OWNER
 	&page_owner_ops,
 #endif
@@ -120,7 +118,7 @@ void __meminit pgdat_page_ext_init(struct pglist_data *pgdat)
 	pgdat->node_page_ext = NULL;
 }
 
-struct page_ext *lookup_page_ext(const struct page *page)
+struct page_ext *lookup_page_ext(struct page *page)
 {
 	unsigned long pfn = page_to_pfn(page);
 	unsigned long index;
@@ -195,7 +193,7 @@ fail:
 
 #else /* CONFIG_FLAT_NODE_MEM_MAP */
 
-struct page_ext *lookup_page_ext(const struct page *page)
+struct page_ext *lookup_page_ext(struct page *page)
 {
 	unsigned long pfn = page_to_pfn(page);
 	struct mem_section *section = __pfn_to_section(pfn);
@@ -273,7 +271,6 @@ static void free_page_ext(void *addr)
 		table_size = get_entry_size() * PAGES_PER_SECTION;
 
 		BUG_ON(PageReserved(page));
-		kmemleak_free(addr);
 		free_pages_exact(addr, table_size);
 	}
 }
@@ -399,8 +396,10 @@ void __init page_ext_init(void)
 			 * We know some arch can have a nodes layout such as
 			 * -------------pfn-------------->
 			 * N0 | N1 | N2 | N0 | N1 | N2|....
+			 *
+			 * Take into account DEFERRED_STRUCT_PAGE_INIT.
 			 */
-			if (pfn_to_nid(pfn) != nid)
+			if (early_pfn_to_nid(pfn) != nid)
 				continue;
 			if (init_section_page_ext(pfn, nid))
 				goto oom;

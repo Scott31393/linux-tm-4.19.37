@@ -393,8 +393,7 @@ static void dcon_set_source_sync(struct dcon_priv *dcon, int arg)
 }
 
 static ssize_t dcon_mode_show(struct device *dev,
-			      struct device_attribute *attr,
-			      char *buf)
+	struct device_attribute *attr, char *buf)
 {
 	struct dcon_priv *dcon = dev_get_drvdata(dev);
 
@@ -402,8 +401,7 @@ static ssize_t dcon_mode_show(struct device *dev,
 }
 
 static ssize_t dcon_sleep_show(struct device *dev,
-			       struct device_attribute *attr,
-			       char *buf)
+	struct device_attribute *attr, char *buf)
 {
 	struct dcon_priv *dcon = dev_get_drvdata(dev);
 
@@ -411,8 +409,7 @@ static ssize_t dcon_sleep_show(struct device *dev,
 }
 
 static ssize_t dcon_freeze_show(struct device *dev,
-				struct device_attribute *attr,
-				char *buf)
+	struct device_attribute *attr, char *buf)
 {
 	struct dcon_priv *dcon = dev_get_drvdata(dev);
 
@@ -420,8 +417,7 @@ static ssize_t dcon_freeze_show(struct device *dev,
 }
 
 static ssize_t dcon_mono_show(struct device *dev,
-			      struct device_attribute *attr,
-			      char *buf)
+	struct device_attribute *attr, char *buf)
 {
 	struct dcon_priv *dcon = dev_get_drvdata(dev);
 
@@ -429,15 +425,13 @@ static ssize_t dcon_mono_show(struct device *dev,
 }
 
 static ssize_t dcon_resumeline_show(struct device *dev,
-				    struct device_attribute *attr,
-				    char *buf)
+	struct device_attribute *attr, char *buf)
 {
 	return sprintf(buf, "%d\n", resumeline);
 }
 
 static ssize_t dcon_mono_store(struct device *dev,
-			       struct device_attribute *attr,
-			       const char *buf, size_t count)
+	struct device_attribute *attr, const char *buf, size_t count)
 {
 	unsigned long enable_mono;
 	int rc;
@@ -452,8 +446,7 @@ static ssize_t dcon_mono_store(struct device *dev,
 }
 
 static ssize_t dcon_freeze_store(struct device *dev,
-				 struct device_attribute *attr,
-				 const char *buf, size_t count)
+	struct device_attribute *attr, const char *buf, size_t count)
 {
 	struct dcon_priv *dcon = dev_get_drvdata(dev);
 	unsigned long output;
@@ -481,8 +474,7 @@ static ssize_t dcon_freeze_store(struct device *dev,
 }
 
 static ssize_t dcon_resumeline_store(struct device *dev,
-				     struct device_attribute *attr,
-				     const char *buf, size_t count)
+	struct device_attribute *attr, const char *buf, size_t count)
 {
 	unsigned short rl;
 	int rc;
@@ -498,8 +490,7 @@ static ssize_t dcon_resumeline_store(struct device *dev,
 }
 
 static ssize_t dcon_sleep_store(struct device *dev,
-				struct device_attribute *attr,
-				const char *buf, size_t count)
+	struct device_attribute *attr, const char *buf, size_t count)
 {
 	unsigned long output;
 	int ret;
@@ -650,8 +641,7 @@ static int dcon_probe(struct i2c_client *client, const struct i2c_device_id *id)
 	/* Add the backlight device for the DCON */
 	dcon_bl_props.brightness = dcon->bl_val;
 	dcon->bl_dev = backlight_device_register("dcon-bl", &dcon_device->dev,
-						 dcon, &dcon_bl_ops,
-						 &dcon_bl_props);
+		dcon, &dcon_bl_ops, &dcon_bl_props);
 	if (IS_ERR(dcon->bl_dev)) {
 		dev_err(&client->dev, "cannot register backlight dev (%ld)\n",
 			PTR_ERR(dcon->bl_dev));

@@ -48,8 +48,6 @@ static inline bool have_hwcap2(unsigned long ftr2)
 }
 #endif
 
-bool is_ppc64le(void);
-
 /* Yes, this is evil */
 #define FAIL_IF(x)						\
 do {								\

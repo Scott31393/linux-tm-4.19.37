@@ -651,7 +651,6 @@
 			#size-cells = <0>;
 			compatible = "snps,designware-i2c";
 			reg = <0xffc04000 0x1000>;
-			resets = <&rst I2C0_RESET>;
 			clocks = <&l4_sp_clk>;
 			interrupts = <0 158 0x4>;
 			status = "disabled";
@@ -662,7 +661,6 @@
 			#size-cells = <0>;
 			compatible = "snps,designware-i2c";
 			reg = <0xffc05000 0x1000>;
-			resets = <&rst I2C1_RESET>;
 			clocks = <&l4_sp_clk>;
 			interrupts = <0 159 0x4>;
 			status = "disabled";
@@ -673,7 +671,6 @@
 			#size-cells = <0>;
 			compatible = "snps,designware-i2c";
 			reg = <0xffc06000 0x1000>;
-			resets = <&rst I2C2_RESET>;
 			clocks = <&l4_sp_clk>;
 			interrupts = <0 160 0x4>;
 			status = "disabled";
@@ -684,7 +681,6 @@
 			#size-cells = <0>;
 			compatible = "snps,designware-i2c";
 			reg = <0xffc07000 0x1000>;
-			resets = <&rst I2C3_RESET>;
 			clocks = <&l4_sp_clk>;
 			interrupts = <0 161 0x4>;
 			status = "disabled";

@@ -37,6 +37,13 @@ config CPU_FREQ_STAT
 
 	  If in doubt, say N.
 
+config CPU_FREQ_TIMES
+       bool "CPU frequency time-in-state statistics"
+       help
+         Export CPU time-in-state information through procfs.
+
+         If in doubt, say N.
+
 choice
 	prompt "Default CPUFreq governor"
 	default CPU_FREQ_DEFAULT_GOV_USERSPACE if ARM_SA1100_CPUFREQ || ARM_SA1110_CPUFREQ
@@ -237,6 +244,16 @@ endif
 
 if PPC32 || PPC64
 source "drivers/cpufreq/Kconfig.powerpc"
+endif
+
+if AVR32
+config AVR32_AT32AP_CPUFREQ
+	bool "CPU frequency driver for AT32AP"
+	depends on PLATFORM_AT32AP
+	default n
+	help
+	  This enables the CPU frequency driver for AT32AP processors.
+	  If in doubt, say N.
 endif
 
 if IA64

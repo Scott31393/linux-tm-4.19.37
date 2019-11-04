@@ -22,6 +22,7 @@
 
 #include <asm/display7seg.h>
 
+#define D7S_MINOR	193
 #define DRIVER_NAME	"d7s"
 #define PFX		DRIVER_NAME ": "
 
@@ -220,7 +221,6 @@ static int d7s_probe(struct platform_device *op)
 	dev_set_drvdata(&op->dev, p);
 	d7s_device = p;
 	err = 0;
-	of_node_put(opts);
 
 out:
 	return err;

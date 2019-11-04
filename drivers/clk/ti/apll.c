@@ -133,10 +133,9 @@ static const struct clk_ops apll_ck_ops = {
 	.get_parent	= &dra7_init_apll_parent,
 };
 
-static void __init omap_clk_register_apll(void *user,
+static void __init omap_clk_register_apll(struct clk_hw *hw,
 					  struct device_node *node)
 {
-	struct clk_hw *hw = user;
 	struct clk_hw_omap *clk_hw = to_clk_hw_omap(hw);
 	struct dpll_data *ad = clk_hw->dpll_data;
 	struct clk *clk;
@@ -206,7 +205,7 @@ static void __init of_dra7_apll_setup(struct device_node *node)
 		goto cleanup;
 	}
 
-	parent_names = kcalloc(init->num_parents, sizeof(char *), GFP_KERNEL);
+	parent_names = kzalloc(sizeof(char *) * init->num_parents, GFP_KERNEL);
 	if (!parent_names)
 		goto cleanup;
 

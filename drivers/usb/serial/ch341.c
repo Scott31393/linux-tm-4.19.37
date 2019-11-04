@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright 2007, Frank A Kingswood <frank@kingswood-consulting.co.uk>
  * Copyright 2007, Werner Cornelius <werner@cornelius-consult.de>
@@ -10,6 +9,10 @@
  * serial port, an IEEE-1284 parallel printer port or a memory-like
  * interface. In all cases the CH341 supports an I2C interface as well.
  * This driver only supports the asynchronous serial interface.
+ *
+ * This program is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU General Public License version
+ * 2 as published by the Free Software Foundation.
  */
 
 #include <linux/kernel.h>
@@ -641,4 +644,4 @@ static struct usb_serial_driver * const serial_drivers[] = {
 
 module_usb_serial_driver(serial_drivers, id_table);
 
-MODULE_LICENSE("GPL v2");
+MODULE_LICENSE("GPL");

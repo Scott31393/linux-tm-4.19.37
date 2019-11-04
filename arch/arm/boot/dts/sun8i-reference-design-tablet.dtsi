@@ -85,7 +85,8 @@
 	pinctrl-0 = <&mmc0_pins_a>, <&mmc0_cd_pin>;
 	vmmc-supply = <&reg_dcdc1>;
 	bus-width = <4>;
-	cd-gpios = <&pio 1 4 GPIO_ACTIVE_LOW>; /* PB4 */
+	cd-gpios = <&pio 1 4 GPIO_ACTIVE_HIGH>; /* PB4 */
+	cd-inverted;
 	status = "okay";
 };
 
@@ -123,14 +124,6 @@
 };
 
 #include "axp223.dtsi"
-
-&ac_power_supply {
-	status = "okay";
-};
-
-&battery_power_supply {
-	status = "okay";
-};
 
 &reg_aldo1 {
 	regulator-always-on;

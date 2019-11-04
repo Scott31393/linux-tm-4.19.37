@@ -1598,7 +1598,7 @@ static int rtl2831u_rc_query(struct dvb_usb_device *d)
 	struct rtl28xxu_dev *dev = d->priv;
 	u8 buf[5];
 	u32 rc_code;
-	static const struct rtl28xxu_reg_val rc_nec_tab[] = {
+	struct rtl28xxu_reg_val rc_nec_tab[] = {
 		{ 0x3033, 0x80 },
 		{ 0x3020, 0x43 },
 		{ 0x3021, 0x16 },
@@ -1732,7 +1732,7 @@ static int rtl2832u_rc_query(struct dvb_usb_device *d)
 		goto exit;
 
 	ret = rtl28xxu_rd_reg(d, IR_RX_BC, &buf[0]);
-	if (ret || buf[0] > sizeof(buf))
+	if (ret)
 		goto err;
 
 	len = buf[0];
@@ -1917,10 +1917,6 @@ static const struct usb_device_id rtl28xxu_id_table[] = {
 		&rtl28xxu_props, "Compro VideoMate U650F", NULL) },
 	{ DVB_USB_DEVICE(USB_VID_KWORLD_2, 0xd394,
 		&rtl28xxu_props, "MaxMedia HU394-T", NULL) },
-	{ DVB_USB_DEVICE(USB_VID_GTEK, 0xb803 /*USB_PID_AUGUST_DVBT205*/,
-		&rtl28xxu_props, "August DVB-T 205", NULL) },
-	{ DVB_USB_DEVICE(USB_VID_GTEK, 0xa803 /*USB_PID_AUGUST_DVBT205*/,
-		&rtl28xxu_props, "August DVB-T 205", NULL) },
 	{ DVB_USB_DEVICE(USB_VID_LEADTEK, 0x6a03,
 		&rtl28xxu_props, "Leadtek WinFast DTV Dongle mini", NULL) },
 	{ DVB_USB_DEVICE(USB_VID_GTEK, USB_PID_CPYTO_REDI_PC50A,

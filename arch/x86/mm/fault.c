@@ -16,7 +16,6 @@
 #include <linux/prefetch.h>		/* prefetchw			*/
 #include <linux/context_tracking.h>	/* exception_enter(), ...	*/
 #include <linux/uaccess.h>		/* faulthandler_disabled()	*/
-#include <linux/mm_types.h>
 
 #include <asm/cpufeature.h>		/* boot_cpu_has, ...		*/
 #include <asm/traps.h>			/* dotraplinkage, ...		*/
@@ -210,7 +209,6 @@ force_sig_info_fault(int si_signo, int si_code, unsigned long address,
 	unsigned lsb = 0;
 	siginfo_t info;
 
-	clear_siginfo(&info);
 	info.si_signo	= si_signo;
 	info.si_errno	= 0;
 	info.si_code	= si_code;
@@ -318,6 +316,8 @@ static noinline int vmalloc_fault(unsigned long address)
 	if (!(address >= VMALLOC_START && address < VMALLOC_END))
 		return -1;
 
+	WARN_ON_ONCE(in_nmi());
+
 	/*
 	 * Synchronize this task's top level page-table
 	 * with the 'reference' page table.
@@ -417,11 +417,11 @@ void vmalloc_sync_all(void)
  */
 static noinline int vmalloc_fault(unsigned long address)
 {
-	pgd_t *pgd, *pgd_k;
-	p4d_t *p4d, *p4d_k;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *pte;
+	pgd_t *pgd, *pgd_ref;
+	p4d_t *p4d, *p4d_ref;
+	pud_t *pud, *pud_ref;
+	pmd_t *pmd, *pmd_ref;
+	pte_t *pte, *pte_ref;
 
 	/* Make sure we are in vmalloc area: */
 	if (!(address >= VMALLOC_START && address < VMALLOC_END))
@@ -435,51 +435,77 @@ static noinline int vmalloc_fault(unsigned long address)
 	 * case just flush:
 	 */
 	pgd = (pgd_t *)__va(read_cr3_pa()) + pgd_index(address);
-	pgd_k = pgd_offset_k(address);
-	if (pgd_none(*pgd_k))
+	pgd_ref = pgd_offset_k(address);
+	if (pgd_none(*pgd_ref))
 		return -1;
 
-	if (pgtable_l5_enabled()) {
-		if (pgd_none(*pgd)) {
-			set_pgd(pgd, *pgd_k);
-			arch_flush_lazy_mmu_mode();
-		} else {
-			BUG_ON(pgd_page_vaddr(*pgd) != pgd_page_vaddr(*pgd_k));
-		}
+	if (pgd_none(*pgd)) {
+		set_pgd(pgd, *pgd_ref);
+		arch_flush_lazy_mmu_mode();
+	} else if (CONFIG_PGTABLE_LEVELS > 4) {
+		/*
+		 * With folded p4d, pgd_none() is always false, so the pgd may
+		 * point to an empty page table entry and pgd_page_vaddr()
+		 * will return garbage.
+		 *
+		 * We will do the correct sanity check on the p4d level.
+		 */
+		BUG_ON(pgd_page_vaddr(*pgd) != pgd_page_vaddr(*pgd_ref));
 	}
 
 	/* With 4-level paging, copying happens on the p4d level. */
 	p4d = p4d_offset(pgd, address);
-	p4d_k = p4d_offset(pgd_k, address);
-	if (p4d_none(*p4d_k))
+	p4d_ref = p4d_offset(pgd_ref, address);
+	if (p4d_none(*p4d_ref))
 		return -1;
 
-	if (p4d_none(*p4d) && !pgtable_l5_enabled()) {
-		set_p4d(p4d, *p4d_k);
+	if (p4d_none(*p4d)) {
+		set_p4d(p4d, *p4d_ref);
 		arch_flush_lazy_mmu_mode();
 	} else {
-		BUG_ON(p4d_pfn(*p4d) != p4d_pfn(*p4d_k));
+		BUG_ON(p4d_pfn(*p4d) != p4d_pfn(*p4d_ref));
 	}
 
-	BUILD_BUG_ON(CONFIG_PGTABLE_LEVELS < 4);
+	/*
+	 * Below here mismatches are bugs because these lower tables
+	 * are shared:
+	 */
 
 	pud = pud_offset(p4d, address);
-	if (pud_none(*pud))
+	pud_ref = pud_offset(p4d_ref, address);
+	if (pud_none(*pud_ref))
 		return -1;
+
+	if (pud_none(*pud) || pud_pfn(*pud) != pud_pfn(*pud_ref))
+		BUG();
 
 	if (pud_large(*pud))
 		return 0;
 
 	pmd = pmd_offset(pud, address);
-	if (pmd_none(*pmd))
+	pmd_ref = pmd_offset(pud_ref, address);
+	if (pmd_none(*pmd_ref))
 		return -1;
+
+	if (pmd_none(*pmd) || pmd_pfn(*pmd) != pmd_pfn(*pmd_ref))
+		BUG();
 
 	if (pmd_large(*pmd))
 		return 0;
 
-	pte = pte_offset_kernel(pmd, address);
-	if (!pte_present(*pte))
+	pte_ref = pte_offset_kernel(pmd_ref, address);
+	if (!pte_present(*pte_ref))
 		return -1;
+
+	pte = pte_offset_kernel(pmd, address);
+
+	/*
+	 * Don't use pte_page here, because the mappings can point
+	 * outside mem_map, and the NUMA hash lookup cannot handle
+	 * that:
+	 */
+	if (!pte_present(*pte) || pte_pfn(*pte) != pte_pfn(*pte_ref))
+		BUG();
 
 	return 0;
 }
@@ -640,6 +666,11 @@ static int is_f00f_bug(struct pt_regs *regs, unsigned long address)
 	return 0;
 }
 
+static const char nx_warning[] = KERN_CRIT
+"kernel tried to execute NX-protected page - exploit attempt? (uid: %d)\n";
+static const char smep_warning[] = KERN_CRIT
+"unable to execute userspace code (SMEP?) (uid: %d)\n";
+
 static void
 show_fault_oops(struct pt_regs *regs, unsigned long error_code,
 		unsigned long address)
@@ -658,18 +689,21 @@ show_fault_oops(struct pt_regs *regs, unsigned long error_code,
 		pte = lookup_address_in_pgd(pgd, address, &level);
 
 		if (pte && pte_present(*pte) && !pte_exec(*pte))
-			pr_crit("kernel tried to execute NX-protected page - exploit attempt? (uid: %d)\n",
-				from_kuid(&init_user_ns, current_uid()));
+			printk(nx_warning, from_kuid(&init_user_ns, current_uid()));
 		if (pte && pte_present(*pte) && pte_exec(*pte) &&
 				(pgd_flags(*pgd) & _PAGE_USER) &&
 				(__read_cr4() & X86_CR4_SMEP))
-			pr_crit("unable to execute userspace code (SMEP?) (uid: %d)\n",
-				from_kuid(&init_user_ns, current_uid()));
+			printk(smep_warning, from_kuid(&init_user_ns, current_uid()));
 	}
 
-	pr_alert("BUG: unable to handle kernel %s at %px\n",
-		 address < PAGE_SIZE ? "NULL pointer dereference" : "paging request",
-		 (void *)address);
+	printk(KERN_ALERT "BUG: unable to handle kernel ");
+	if (address < PAGE_SIZE)
+		printk(KERN_CONT "NULL pointer dereference");
+	else
+		printk(KERN_CONT "paging request");
+
+	printk(KERN_CONT " at %p\n", (void *) address);
+	printk(KERN_ALERT "IP: %pS\n", (void *)regs->ip);
 
 	dump_pagetable(address);
 }
@@ -821,23 +855,20 @@ static inline void
 show_signal_msg(struct pt_regs *regs, unsigned long error_code,
 		unsigned long address, struct task_struct *tsk)
 {
-	const char *loglvl = task_pid_nr(tsk) > 1 ? KERN_INFO : KERN_EMERG;
-
 	if (!unhandled_signal(tsk, SIGSEGV))
 		return;
 
 	if (!printk_ratelimit())
 		return;
 
-	printk("%s%s[%d]: segfault at %lx ip %px sp %px error %lx",
-		loglvl, tsk->comm, task_pid_nr(tsk), address,
+	printk("%s%s[%d]: segfault at %lx ip %p sp %p error %lx",
+		task_pid_nr(tsk) > 1 ? KERN_INFO : KERN_EMERG,
+		tsk->comm, task_pid_nr(tsk), address,
 		(void *)regs->ip, (void *)regs->sp, error_code);
 
 	print_vma_addr(KERN_CONT " in ", regs->ip);
 
 	printk(KERN_CONT "\n");
-
-	show_opcodes(regs, loglvl);
 }
 
 static void
@@ -1000,7 +1031,7 @@ do_sigbus(struct pt_regs *regs, unsigned long error_code, unsigned long address,
 
 static noinline void
 mm_fault_error(struct pt_regs *regs, unsigned long error_code,
-	       unsigned long address, u32 *pkey, vm_fault_t fault)
+	       unsigned long address, u32 *pkey, unsigned int fault)
 {
 	if (fatal_signal_pending(current) && !(error_code & X86_PF_USER)) {
 		no_context(regs, error_code, address, 0, 0);
@@ -1214,7 +1245,7 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
 	struct vm_area_struct *vma;
 	struct task_struct *tsk;
 	struct mm_struct *mm;
-	vm_fault_t fault, major = 0;
+	int fault, major = 0;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 	u32 pkey;
 

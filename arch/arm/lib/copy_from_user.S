@@ -89,18 +89,11 @@
 
 	.text
 
-ENTRY(__copy_from_user_std)
-WEAK(arm_copy_from_user)
-#ifdef CONFIG_CPU_SPECTRE
-	get_thread_info r3
-	ldr	r3, [r3, #TI_ADDR_LIMIT]
-	uaccess_mask_range_ptr r1, r2, r3, ip
-#endif
+ENTRY(arm_copy_from_user)
 
 #include "copy_template.S"
 
 ENDPROC(arm_copy_from_user)
-ENDPROC(__copy_from_user_std)
 
 	.pushsection .fixup,"ax"
 	.align 0

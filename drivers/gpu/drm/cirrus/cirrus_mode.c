@@ -101,13 +101,17 @@ static int cirrus_crtc_do_set_base(struct drm_crtc *crtc,
 				int x, int y, int atomic)
 {
 	struct cirrus_device *cdev = crtc->dev->dev_private;
+	struct drm_gem_object *obj;
+	struct cirrus_framebuffer *cirrus_fb;
 	struct cirrus_bo *bo;
 	int ret;
 	u64 gpu_addr;
 
 	/* push the previous fb to system ram */
 	if (!atomic && fb) {
-		bo = gem_to_cirrus_bo(fb->obj[0]);
+		cirrus_fb = to_cirrus_framebuffer(fb);
+		obj = cirrus_fb->obj;
+		bo = gem_to_cirrus_bo(obj);
 		ret = cirrus_bo_reserve(bo, false);
 		if (ret)
 			return ret;
@@ -115,7 +119,9 @@ static int cirrus_crtc_do_set_base(struct drm_crtc *crtc,
 		cirrus_bo_unreserve(bo);
 	}
 
-	bo = gem_to_cirrus_bo(crtc->primary->fb->obj[0]);
+	cirrus_fb = to_cirrus_framebuffer(crtc->primary->fb);
+	obj = cirrus_fb->obj;
+	bo = gem_to_cirrus_bo(obj);
 
 	ret = cirrus_bo_reserve(bo, false);
 	if (ret)
@@ -127,7 +133,7 @@ static int cirrus_crtc_do_set_base(struct drm_crtc *crtc,
 		return ret;
 	}
 
-	if (cdev->mode_info.gfbdev->gfb == crtc->primary->fb) {
+	if (&cdev->mode_info.gfbdev->gfb == cirrus_fb) {
 		/* if pushing console in kmap it */
 		ret = ttm_bo_kmap(&bo->bo, 0, bo->bo.num_pages, &bo->kmap);
 		if (ret)
@@ -457,7 +463,7 @@ static struct drm_encoder *cirrus_connector_best_encoder(struct drm_connector
 	int enc_id = connector->encoder_ids[0];
 	/* pick the encoder ids */
 	if (enc_id)
-		return drm_encoder_find(connector->dev, NULL, enc_id);
+		return drm_encoder_find(connector->dev, enc_id);
 	return NULL;
 }
 
@@ -530,7 +536,7 @@ int cirrus_modeset_init(struct cirrus_device *cdev)
 		return -1;
 	}
 
-	drm_connector_attach_encoder(connector, encoder);
+	drm_mode_connector_attach_encoder(connector, encoder);
 
 	ret = cirrus_fbdev_init(cdev);
 	if (ret) {

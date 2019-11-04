@@ -177,7 +177,7 @@ static int sas_smp_dispatch(struct bsg_job *job)
 	if (!scsi_is_host_device(job->dev))
 		rphy = dev_to_rphy(job->dev);
 
-	if (!job->reply_payload.payload_len) {
+	if (!job->req->next_rq) {
 		dev_warn(job->dev, "space for a smp response is missing\n");
 		bsg_job_done(job, -EINVAL, 0);
 		return 0;
@@ -185,6 +185,16 @@ static int sas_smp_dispatch(struct bsg_job *job)
 
 	to_sas_internal(shost->transportt)->f->smp_handler(job, shost, rphy);
 	return 0;
+}
+
+static void sas_host_release(struct device *dev)
+{
+	struct Scsi_Host *shost = dev_to_shost(dev);
+	struct sas_host_attrs *sas_host = to_sas_host_attrs(shost);
+	struct request_queue *q = sas_host->q;
+
+	if (q)
+		blk_cleanup_queue(q);
 }
 
 static int sas_bsg_initialize(struct Scsi_Host *shost, struct sas_rphy *rphy)
@@ -198,7 +208,7 @@ static int sas_bsg_initialize(struct Scsi_Host *shost, struct sas_rphy *rphy)
 
 	if (rphy) {
 		q = bsg_setup_queue(&rphy->dev, dev_name(&rphy->dev),
-				sas_smp_dispatch, 0);
+				sas_smp_dispatch, 0, NULL);
 		if (IS_ERR(q))
 			return PTR_ERR(q);
 		rphy->q = q;
@@ -207,13 +217,18 @@ static int sas_bsg_initialize(struct Scsi_Host *shost, struct sas_rphy *rphy)
 
 		snprintf(name, sizeof(name), "sas_host%d", shost->host_no);
 		q = bsg_setup_queue(&shost->shost_gendev, name,
-				sas_smp_dispatch, 0);
+				sas_smp_dispatch, 0, sas_host_release);
 		if (IS_ERR(q))
 			return PTR_ERR(q);
 		to_sas_host_attrs(shost)->q = q;
 	}
 
-	blk_queue_flag_set(QUEUE_FLAG_BIDI, q);
+	/*
+	 * by default assume old behaviour and bounce for any highmem page
+	 */
+	blk_queue_bounce_limit(q, BLK_BOUNCE_HIGH);
+	queue_flag_set_unlocked(QUEUE_FLAG_BIDI, q);
+	queue_flag_set_unlocked(QUEUE_FLAG_SCSI_PASSTHROUGH, q);
 	return 0;
 }
 
@@ -246,11 +261,8 @@ static int sas_host_remove(struct transport_container *tc, struct device *dev,
 	struct Scsi_Host *shost = dev_to_shost(dev);
 	struct request_queue *q = to_sas_host_attrs(shost)->q;
 
-	if (q) {
+	if (q)
 		bsg_unregister_queue(q);
-		blk_cleanup_queue(q);
-	}
-
 	return 0;
 }
 

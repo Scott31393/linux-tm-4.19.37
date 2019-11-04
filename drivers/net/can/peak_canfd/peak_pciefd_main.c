@@ -174,6 +174,9 @@ struct pciefd_page {
 	u32 size;
 };
 
+#define CANFD_IRQ_SET		0x00000001
+#define CANFD_TX_PATH_SET	0x00000002
+
 /* CAN-FD channel object */
 struct pciefd_board;
 struct pciefd_can {
@@ -415,7 +418,7 @@ static int pciefd_pre_cmd(struct peak_canfd_priv *ucan)
 			break;
 
 		/* going into operational mode: setup IRQ handler */
-		err = request_irq(priv->ucan.ndev->irq,
+		err = request_irq(priv->board->pci_dev->irq,
 				  pciefd_irq_handler,
 				  IRQF_SHARED,
 				  PCIEFD_DRV_NAME,
@@ -488,18 +491,15 @@ static int pciefd_post_cmd(struct peak_canfd_priv *ucan)
 
 		/* controller now in reset mode: */
 
-		/* disable IRQ for this CAN */
-		pciefd_can_writereg(priv, CANFD_CTL_IEN_BIT,
-				    PCIEFD_REG_CAN_RX_CTL_CLR);
-
 		/* stop and reset DMA addresses in Tx/Rx engines */
 		pciefd_can_clear_tx_dma(priv);
 		pciefd_can_clear_rx_dma(priv);
 
-		/* wait for above commands to complete (read cycle) */
-		(void)pciefd_sys_readreg(priv->board, PCIEFD_REG_SYS_VER1);
+		/* disable IRQ for this CAN */
+		pciefd_can_writereg(priv, CANFD_CTL_IEN_BIT,
+				    PCIEFD_REG_CAN_RX_CTL_CLR);
 
-		free_irq(priv->ucan.ndev->irq, priv);
+		free_irq(priv->board->pci_dev->irq, priv);
 
 		ucan->can.state = CAN_STATE_STOPPED;
 
@@ -638,7 +638,7 @@ static int pciefd_can_probe(struct pciefd_board *pciefd)
 						 GFP_KERNEL);
 	if (!priv->tx_dma_vaddr) {
 		dev_err(&pciefd->pci_dev->dev,
-			"Tx dmam_alloc_coherent(%u) failure\n",
+			"Tx dmaim_alloc_coherent(%u) failure\n",
 			PCIEFD_TX_DMA_SIZE);
 		goto err_free_candev;
 	}
@@ -691,7 +691,7 @@ static int pciefd_can_probe(struct pciefd_board *pciefd)
 	pciefd->can[pciefd->can_count] = priv;
 
 	dev_info(&pciefd->pci_dev->dev, "%s at reg_base=0x%p irq=%d\n",
-		 ndev->name, priv->reg_base, ndev->irq);
+		 ndev->name, priv->reg_base, pciefd->pci_dev->irq);
 
 	return 0;
 
@@ -756,7 +756,8 @@ static int peak_pciefd_probe(struct pci_dev *pdev,
 		can_count = 1;
 
 	/* allocate board structure object */
-	pciefd = devm_kzalloc(&pdev->dev, struct_size(pciefd, can, can_count),
+	pciefd = devm_kzalloc(&pdev->dev, sizeof(*pciefd) +
+			      can_count * sizeof(*pciefd->can),
 			      GFP_KERNEL);
 	if (!pciefd) {
 		err = -ENOMEM;

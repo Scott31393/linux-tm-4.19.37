@@ -79,6 +79,8 @@ struct tilcdc_drm_private {
 
 	struct workqueue_struct *wq;
 
+	struct drm_fbdev_cma *fbdev;
+
 	struct drm_crtc *crtc;
 
 	unsigned int num_encoders;

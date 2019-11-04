@@ -7,7 +7,7 @@
  */
 
 #include "compat.h"
-#include "ctrl.h"
+
 #include "regs.h"
 #include "intern.h"
 #include "desc_constr.h"
@@ -53,7 +53,6 @@ struct caam_ctx {
 	u32 sh_desc_givenc[DESC_MAX_USED_LEN];
 	u8 key[CAAM_MAX_KEY_SIZE];
 	dma_addr_t key_dma;
-	enum dma_data_direction dir;
 	struct alginfo adata;
 	struct alginfo cdata;
 	unsigned int authsize;
@@ -75,7 +74,6 @@ static int aead_set_sh_desc(struct crypto_aead *aead)
 	const bool ctr_mode = ((ctx->cdata.algtype & OP_ALG_AAI_MASK) ==
 			       OP_ALG_AAI_CTR_MOD128);
 	const bool is_rfc3686 = alg->caam.rfc3686;
-	struct caam_drv_private *ctrlpriv = dev_get_drvdata(ctx->jrdev->parent);
 
 	if (!ctx->cdata.keylen || !ctx->authsize)
 		return 0;
@@ -126,7 +124,7 @@ static int aead_set_sh_desc(struct crypto_aead *aead)
 
 	cnstr_shdsc_aead_encap(ctx->sh_desc_enc, &ctx->cdata, &ctx->adata,
 			       ivsize, ctx->authsize, is_rfc3686, nonce,
-			       ctx1_iv_off, true, ctrlpriv->era);
+			       ctx1_iv_off, true);
 
 skip_enc:
 	/* aead_decrypt shared descriptor */
@@ -151,8 +149,7 @@ skip_enc:
 
 	cnstr_shdsc_aead_decap(ctx->sh_desc_dec, &ctx->cdata, &ctx->adata,
 			       ivsize, ctx->authsize, alg->caam.geniv,
-			       is_rfc3686, nonce, ctx1_iv_off, true,
-			       ctrlpriv->era);
+			       is_rfc3686, nonce, ctx1_iv_off, true);
 
 	if (!alg->caam.geniv)
 		goto skip_givenc;
@@ -179,7 +176,7 @@ skip_enc:
 
 	cnstr_shdsc_aead_givencap(ctx->sh_desc_enc, &ctx->cdata, &ctx->adata,
 				  ivsize, ctx->authsize, is_rfc3686, nonce,
-				  ctx1_iv_off, true, ctrlpriv->era);
+				  ctx1_iv_off, true);
 
 skip_givenc:
 	return 0;
@@ -200,7 +197,6 @@ static int aead_setkey(struct crypto_aead *aead, const u8 *key,
 {
 	struct caam_ctx *ctx = crypto_aead_ctx(aead);
 	struct device *jrdev = ctx->jrdev;
-	struct caam_drv_private *ctrlpriv = dev_get_drvdata(jrdev->parent);
 	struct crypto_authenc_keys keys;
 	int ret = 0;
 
@@ -215,27 +211,6 @@ static int aead_setkey(struct crypto_aead *aead, const u8 *key,
 		       DUMP_PREFIX_ADDRESS, 16, 4, key, keylen, 1);
 #endif
 
-	/*
-	 * If DKP is supported, use it in the shared descriptor to generate
-	 * the split key.
-	 */
-	if (ctrlpriv->era >= 6) {
-		ctx->adata.keylen = keys.authkeylen;
-		ctx->adata.keylen_pad = split_key_len(ctx->adata.algtype &
-						      OP_ALG_ALGSEL_MASK);
-
-		if (ctx->adata.keylen_pad + keys.enckeylen > CAAM_MAX_KEY_SIZE)
-			goto badkey;
-
-		memcpy(ctx->key, keys.authkey, keys.authkeylen);
-		memcpy(ctx->key + ctx->adata.keylen_pad, keys.enckey,
-		       keys.enckeylen);
-		dma_sync_single_for_device(jrdev, ctx->key_dma,
-					   ctx->adata.keylen_pad +
-					   keys.enckeylen, ctx->dir);
-		goto skip_split_key;
-	}
-
 	ret = gen_split_key(jrdev, ctx->key, &ctx->adata, keys.authkey,
 			    keys.authkeylen, CAAM_MAX_KEY_SIZE -
 			    keys.enckeylen);
@@ -245,14 +220,13 @@ static int aead_setkey(struct crypto_aead *aead, const u8 *key,
 	/* postpend encryption key to auth split key */
 	memcpy(ctx->key + ctx->adata.keylen_pad, keys.enckey, keys.enckeylen);
 	dma_sync_single_for_device(jrdev, ctx->key_dma, ctx->adata.keylen_pad +
-				   keys.enckeylen, ctx->dir);
+				   keys.enckeylen, DMA_TO_DEVICE);
 #ifdef DEBUG
 	print_hex_dump(KERN_ERR, "ctx.key@" __stringify(__LINE__)": ",
 		       DUMP_PREFIX_ADDRESS, 16, 4, ctx->key,
 		       ctx->adata.keylen_pad + keys.enckeylen, 1);
 #endif
 
-skip_split_key:
 	ctx->cdata.keylen = keys.enckeylen;
 
 	ret = aead_set_sh_desc(aead);
@@ -278,315 +252,10 @@ skip_split_key:
 		}
 	}
 
-	memzero_explicit(&keys, sizeof(keys));
 	return ret;
 badkey:
 	crypto_aead_set_flags(aead, CRYPTO_TFM_RES_BAD_KEY_LEN);
-	memzero_explicit(&keys, sizeof(keys));
 	return -EINVAL;
-}
-
-static int gcm_set_sh_desc(struct crypto_aead *aead)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(aead);
-	unsigned int ivsize = crypto_aead_ivsize(aead);
-	int rem_bytes = CAAM_DESC_BYTES_MAX - DESC_JOB_IO_LEN -
-			ctx->cdata.keylen;
-
-	if (!ctx->cdata.keylen || !ctx->authsize)
-		return 0;
-
-	/*
-	 * Job Descriptor and Shared Descriptor
-	 * must fit into the 64-word Descriptor h/w Buffer
-	 */
-	if (rem_bytes >= DESC_QI_GCM_ENC_LEN) {
-		ctx->cdata.key_inline = true;
-		ctx->cdata.key_virt = ctx->key;
-	} else {
-		ctx->cdata.key_inline = false;
-		ctx->cdata.key_dma = ctx->key_dma;
-	}
-
-	cnstr_shdsc_gcm_encap(ctx->sh_desc_enc, &ctx->cdata, ivsize,
-			      ctx->authsize, true);
-
-	/*
-	 * Job Descriptor and Shared Descriptor
-	 * must fit into the 64-word Descriptor h/w Buffer
-	 */
-	if (rem_bytes >= DESC_QI_GCM_DEC_LEN) {
-		ctx->cdata.key_inline = true;
-		ctx->cdata.key_virt = ctx->key;
-	} else {
-		ctx->cdata.key_inline = false;
-		ctx->cdata.key_dma = ctx->key_dma;
-	}
-
-	cnstr_shdsc_gcm_decap(ctx->sh_desc_dec, &ctx->cdata, ivsize,
-			      ctx->authsize, true);
-
-	return 0;
-}
-
-static int gcm_setauthsize(struct crypto_aead *authenc, unsigned int authsize)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(authenc);
-
-	ctx->authsize = authsize;
-	gcm_set_sh_desc(authenc);
-
-	return 0;
-}
-
-static int gcm_setkey(struct crypto_aead *aead,
-		      const u8 *key, unsigned int keylen)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(aead);
-	struct device *jrdev = ctx->jrdev;
-	int ret;
-
-#ifdef DEBUG
-	print_hex_dump(KERN_ERR, "key in @" __stringify(__LINE__)": ",
-		       DUMP_PREFIX_ADDRESS, 16, 4, key, keylen, 1);
-#endif
-
-	memcpy(ctx->key, key, keylen);
-	dma_sync_single_for_device(jrdev, ctx->key_dma, keylen, ctx->dir);
-	ctx->cdata.keylen = keylen;
-
-	ret = gcm_set_sh_desc(aead);
-	if (ret)
-		return ret;
-
-	/* Now update the driver contexts with the new shared descriptor */
-	if (ctx->drv_ctx[ENCRYPT]) {
-		ret = caam_drv_ctx_update(ctx->drv_ctx[ENCRYPT],
-					  ctx->sh_desc_enc);
-		if (ret) {
-			dev_err(jrdev, "driver enc context update failed\n");
-			return ret;
-		}
-	}
-
-	if (ctx->drv_ctx[DECRYPT]) {
-		ret = caam_drv_ctx_update(ctx->drv_ctx[DECRYPT],
-					  ctx->sh_desc_dec);
-		if (ret) {
-			dev_err(jrdev, "driver dec context update failed\n");
-			return ret;
-		}
-	}
-
-	return 0;
-}
-
-static int rfc4106_set_sh_desc(struct crypto_aead *aead)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(aead);
-	unsigned int ivsize = crypto_aead_ivsize(aead);
-	int rem_bytes = CAAM_DESC_BYTES_MAX - DESC_JOB_IO_LEN -
-			ctx->cdata.keylen;
-
-	if (!ctx->cdata.keylen || !ctx->authsize)
-		return 0;
-
-	ctx->cdata.key_virt = ctx->key;
-
-	/*
-	 * Job Descriptor and Shared Descriptor
-	 * must fit into the 64-word Descriptor h/w Buffer
-	 */
-	if (rem_bytes >= DESC_QI_RFC4106_ENC_LEN) {
-		ctx->cdata.key_inline = true;
-	} else {
-		ctx->cdata.key_inline = false;
-		ctx->cdata.key_dma = ctx->key_dma;
-	}
-
-	cnstr_shdsc_rfc4106_encap(ctx->sh_desc_enc, &ctx->cdata, ivsize,
-				  ctx->authsize, true);
-
-	/*
-	 * Job Descriptor and Shared Descriptor
-	 * must fit into the 64-word Descriptor h/w Buffer
-	 */
-	if (rem_bytes >= DESC_QI_RFC4106_DEC_LEN) {
-		ctx->cdata.key_inline = true;
-	} else {
-		ctx->cdata.key_inline = false;
-		ctx->cdata.key_dma = ctx->key_dma;
-	}
-
-	cnstr_shdsc_rfc4106_decap(ctx->sh_desc_dec, &ctx->cdata, ivsize,
-				  ctx->authsize, true);
-
-	return 0;
-}
-
-static int rfc4106_setauthsize(struct crypto_aead *authenc,
-			       unsigned int authsize)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(authenc);
-
-	ctx->authsize = authsize;
-	rfc4106_set_sh_desc(authenc);
-
-	return 0;
-}
-
-static int rfc4106_setkey(struct crypto_aead *aead,
-			  const u8 *key, unsigned int keylen)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(aead);
-	struct device *jrdev = ctx->jrdev;
-	int ret;
-
-	if (keylen < 4)
-		return -EINVAL;
-
-#ifdef DEBUG
-	print_hex_dump(KERN_ERR, "key in @" __stringify(__LINE__)": ",
-		       DUMP_PREFIX_ADDRESS, 16, 4, key, keylen, 1);
-#endif
-
-	memcpy(ctx->key, key, keylen);
-	/*
-	 * The last four bytes of the key material are used as the salt value
-	 * in the nonce. Update the AES key length.
-	 */
-	ctx->cdata.keylen = keylen - 4;
-	dma_sync_single_for_device(jrdev, ctx->key_dma, ctx->cdata.keylen,
-				   ctx->dir);
-
-	ret = rfc4106_set_sh_desc(aead);
-	if (ret)
-		return ret;
-
-	/* Now update the driver contexts with the new shared descriptor */
-	if (ctx->drv_ctx[ENCRYPT]) {
-		ret = caam_drv_ctx_update(ctx->drv_ctx[ENCRYPT],
-					  ctx->sh_desc_enc);
-		if (ret) {
-			dev_err(jrdev, "driver enc context update failed\n");
-			return ret;
-		}
-	}
-
-	if (ctx->drv_ctx[DECRYPT]) {
-		ret = caam_drv_ctx_update(ctx->drv_ctx[DECRYPT],
-					  ctx->sh_desc_dec);
-		if (ret) {
-			dev_err(jrdev, "driver dec context update failed\n");
-			return ret;
-		}
-	}
-
-	return 0;
-}
-
-static int rfc4543_set_sh_desc(struct crypto_aead *aead)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(aead);
-	unsigned int ivsize = crypto_aead_ivsize(aead);
-	int rem_bytes = CAAM_DESC_BYTES_MAX - DESC_JOB_IO_LEN -
-			ctx->cdata.keylen;
-
-	if (!ctx->cdata.keylen || !ctx->authsize)
-		return 0;
-
-	ctx->cdata.key_virt = ctx->key;
-
-	/*
-	 * Job Descriptor and Shared Descriptor
-	 * must fit into the 64-word Descriptor h/w Buffer
-	 */
-	if (rem_bytes >= DESC_QI_RFC4543_ENC_LEN) {
-		ctx->cdata.key_inline = true;
-	} else {
-		ctx->cdata.key_inline = false;
-		ctx->cdata.key_dma = ctx->key_dma;
-	}
-
-	cnstr_shdsc_rfc4543_encap(ctx->sh_desc_enc, &ctx->cdata, ivsize,
-				  ctx->authsize, true);
-
-	/*
-	 * Job Descriptor and Shared Descriptor
-	 * must fit into the 64-word Descriptor h/w Buffer
-	 */
-	if (rem_bytes >= DESC_QI_RFC4543_DEC_LEN) {
-		ctx->cdata.key_inline = true;
-	} else {
-		ctx->cdata.key_inline = false;
-		ctx->cdata.key_dma = ctx->key_dma;
-	}
-
-	cnstr_shdsc_rfc4543_decap(ctx->sh_desc_dec, &ctx->cdata, ivsize,
-				  ctx->authsize, true);
-
-	return 0;
-}
-
-static int rfc4543_setauthsize(struct crypto_aead *authenc,
-			       unsigned int authsize)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(authenc);
-
-	ctx->authsize = authsize;
-	rfc4543_set_sh_desc(authenc);
-
-	return 0;
-}
-
-static int rfc4543_setkey(struct crypto_aead *aead,
-			  const u8 *key, unsigned int keylen)
-{
-	struct caam_ctx *ctx = crypto_aead_ctx(aead);
-	struct device *jrdev = ctx->jrdev;
-	int ret;
-
-	if (keylen < 4)
-		return -EINVAL;
-
-#ifdef DEBUG
-	print_hex_dump(KERN_ERR, "key in @" __stringify(__LINE__)": ",
-		       DUMP_PREFIX_ADDRESS, 16, 4, key, keylen, 1);
-#endif
-
-	memcpy(ctx->key, key, keylen);
-	/*
-	 * The last four bytes of the key material are used as the salt value
-	 * in the nonce. Update the AES key length.
-	 */
-	ctx->cdata.keylen = keylen - 4;
-	dma_sync_single_for_device(jrdev, ctx->key_dma, ctx->cdata.keylen,
-				   ctx->dir);
-
-	ret = rfc4543_set_sh_desc(aead);
-	if (ret)
-		return ret;
-
-	/* Now update the driver contexts with the new shared descriptor */
-	if (ctx->drv_ctx[ENCRYPT]) {
-		ret = caam_drv_ctx_update(ctx->drv_ctx[ENCRYPT],
-					  ctx->sh_desc_enc);
-		if (ret) {
-			dev_err(jrdev, "driver enc context update failed\n");
-			return ret;
-		}
-	}
-
-	if (ctx->drv_ctx[DECRYPT]) {
-		ret = caam_drv_ctx_update(ctx->drv_ctx[DECRYPT],
-					  ctx->sh_desc_dec);
-		if (ret) {
-			dev_err(jrdev, "driver dec context update failed\n");
-			return ret;
-		}
-	}
-
-	return 0;
 }
 
 static int ablkcipher_setkey(struct crypto_ablkcipher *ablkcipher,
@@ -603,6 +272,7 @@ static int ablkcipher_setkey(struct crypto_ablkcipher *ablkcipher,
 	const bool is_rfc3686 = (ctr_mode && strstr(alg_name, "rfc3686"));
 	int ret = 0;
 
+	memcpy(ctx->key, key, keylen);
 #ifdef DEBUG
 	print_hex_dump(KERN_ERR, "key in @" __stringify(__LINE__)": ",
 		       DUMP_PREFIX_ADDRESS, 16, 4, key, keylen, 1);
@@ -625,8 +295,9 @@ static int ablkcipher_setkey(struct crypto_ablkcipher *ablkcipher,
 		keylen -= CTR_RFC3686_NONCE_SIZE;
 	}
 
+	dma_sync_single_for_device(jrdev, ctx->key_dma, keylen, DMA_TO_DEVICE);
 	ctx->cdata.keylen = keylen;
-	ctx->cdata.key_virt = key;
+	ctx->cdata.key_virt = ctx->key;
 	ctx->cdata.key_inline = true;
 
 	/* ablkcipher encrypt, decrypt, givencrypt shared descriptors */
@@ -679,12 +350,16 @@ static int xts_ablkcipher_setkey(struct crypto_ablkcipher *ablkcipher,
 	int ret = 0;
 
 	if (keylen != 2 * AES_MIN_KEY_SIZE  && keylen != 2 * AES_MAX_KEY_SIZE) {
+		crypto_ablkcipher_set_flags(ablkcipher,
+					    CRYPTO_TFM_RES_BAD_KEY_LEN);
 		dev_err(jrdev, "key size mismatch\n");
-		goto badkey;
+		return -EINVAL;
 	}
 
+	memcpy(ctx->key, key, keylen);
+	dma_sync_single_for_device(jrdev, ctx->key_dma, keylen, DMA_TO_DEVICE);
 	ctx->cdata.keylen = keylen;
-	ctx->cdata.key_virt = key;
+	ctx->cdata.key_virt = ctx->key;
 	ctx->cdata.key_inline = true;
 
 	/* xts ablkcipher encrypt, decrypt shared descriptors */
@@ -713,7 +388,7 @@ static int xts_ablkcipher_setkey(struct crypto_ablkcipher *ablkcipher,
 	return ret;
 badkey:
 	crypto_ablkcipher_set_flags(ablkcipher, CRYPTO_TFM_RES_BAD_KEY_LEN);
-	return -EINVAL;
+	return 0;
 }
 
 /*
@@ -859,18 +534,8 @@ static void aead_done(struct caam_drv_req *drv_req, u32 status)
 	qidev = caam_ctx->qidev;
 
 	if (unlikely(status)) {
-		u32 ssrc = status & JRSTA_SSRC_MASK;
-		u8 err_id = status & JRSTA_CCBERR_ERRID_MASK;
-
 		caam_jr_strstatus(qidev, status);
-		/*
-		 * verify hw auth check passed else return -EBADMSG
-		 */
-		if (ssrc == JRSTA_SSRC_CCB_ERROR &&
-		    err_id == JRSTA_CCBERR_ERRID_ICVCHK)
-			ecode = -EBADMSG;
-		else
-			ecode = -EIO;
+		ecode = -EIO;
 	}
 
 	edesc = container_of(drv_req, typeof(*edesc), drv_req);
@@ -1119,22 +784,6 @@ static int aead_encrypt(struct aead_request *req)
 
 static int aead_decrypt(struct aead_request *req)
 {
-	return aead_crypt(req, false);
-}
-
-static int ipsec_gcm_encrypt(struct aead_request *req)
-{
-	if (req->assoclen < 8)
-		return -EINVAL;
-
-	return aead_crypt(req, true);
-}
-
-static int ipsec_gcm_decrypt(struct aead_request *req)
-{
-	if (req->assoclen < 8)
-		return -EINVAL;
-
 	return aead_crypt(req, false);
 }
 
@@ -1661,61 +1310,6 @@ static struct caam_alg_template driver_algs[] = {
 };
 
 static struct caam_aead_alg driver_aeads[] = {
-	{
-		.aead = {
-			.base = {
-				.cra_name = "rfc4106(gcm(aes))",
-				.cra_driver_name = "rfc4106-gcm-aes-caam-qi",
-				.cra_blocksize = 1,
-			},
-			.setkey = rfc4106_setkey,
-			.setauthsize = rfc4106_setauthsize,
-			.encrypt = ipsec_gcm_encrypt,
-			.decrypt = ipsec_gcm_decrypt,
-			.ivsize = 8,
-			.maxauthsize = AES_BLOCK_SIZE,
-		},
-		.caam = {
-			.class1_alg_type = OP_ALG_ALGSEL_AES | OP_ALG_AAI_GCM,
-		},
-	},
-	{
-		.aead = {
-			.base = {
-				.cra_name = "rfc4543(gcm(aes))",
-				.cra_driver_name = "rfc4543-gcm-aes-caam-qi",
-				.cra_blocksize = 1,
-			},
-			.setkey = rfc4543_setkey,
-			.setauthsize = rfc4543_setauthsize,
-			.encrypt = ipsec_gcm_encrypt,
-			.decrypt = ipsec_gcm_decrypt,
-			.ivsize = 8,
-			.maxauthsize = AES_BLOCK_SIZE,
-		},
-		.caam = {
-			.class1_alg_type = OP_ALG_ALGSEL_AES | OP_ALG_AAI_GCM,
-		},
-	},
-	/* Galois Counter Mode */
-	{
-		.aead = {
-			.base = {
-				.cra_name = "gcm(aes)",
-				.cra_driver_name = "gcm-aes-caam-qi",
-				.cra_blocksize = 1,
-			},
-			.setkey = gcm_setkey,
-			.setauthsize = gcm_setauthsize,
-			.encrypt = aead_encrypt,
-			.decrypt = aead_decrypt,
-			.ivsize = 12,
-			.maxauthsize = AES_BLOCK_SIZE,
-		},
-		.caam = {
-			.class1_alg_type = OP_ALG_ALGSEL_AES | OP_ALG_AAI_GCM,
-		}
-	},
 	/* single-pass ipsec_esp descriptor */
 	{
 		.aead = {
@@ -2534,8 +2128,7 @@ struct caam_crypto_alg {
 	struct caam_alg_entry caam;
 };
 
-static int caam_init_common(struct caam_ctx *ctx, struct caam_alg_entry *caam,
-			    bool uses_dkp)
+static int caam_init_common(struct caam_ctx *ctx, struct caam_alg_entry *caam)
 {
 	struct caam_drv_private *priv;
 
@@ -2549,14 +2142,8 @@ static int caam_init_common(struct caam_ctx *ctx, struct caam_alg_entry *caam,
 		return PTR_ERR(ctx->jrdev);
 	}
 
-	priv = dev_get_drvdata(ctx->jrdev->parent);
-	if (priv->era >= 6 && uses_dkp)
-		ctx->dir = DMA_BIDIRECTIONAL;
-	else
-		ctx->dir = DMA_TO_DEVICE;
-
 	ctx->key_dma = dma_map_single(ctx->jrdev, ctx->key, sizeof(ctx->key),
-				      ctx->dir);
+				      DMA_TO_DEVICE);
 	if (dma_mapping_error(ctx->jrdev, ctx->key_dma)) {
 		dev_err(ctx->jrdev, "unable to map key\n");
 		caam_jr_free(ctx->jrdev);
@@ -2567,6 +2154,7 @@ static int caam_init_common(struct caam_ctx *ctx, struct caam_alg_entry *caam,
 	ctx->cdata.algtype = OP_TYPE_CLASS1_ALG | caam->class1_alg_type;
 	ctx->adata.algtype = OP_TYPE_CLASS2_ALG | caam->class2_alg_type;
 
+	priv = dev_get_drvdata(ctx->jrdev->parent);
 	ctx->qidev = priv->qidev;
 
 	spin_lock_init(&ctx->lock);
@@ -2584,7 +2172,7 @@ static int caam_cra_init(struct crypto_tfm *tfm)
 							crypto_alg);
 	struct caam_ctx *ctx = crypto_tfm_ctx(tfm);
 
-	return caam_init_common(ctx, &caam_alg->caam, false);
+	return caam_init_common(ctx, &caam_alg->caam);
 }
 
 static int caam_aead_init(struct crypto_aead *tfm)
@@ -2594,8 +2182,7 @@ static int caam_aead_init(struct crypto_aead *tfm)
 						      aead);
 	struct caam_ctx *ctx = crypto_aead_ctx(tfm);
 
-	return caam_init_common(ctx, &caam_alg->caam,
-				alg->setkey == aead_setkey);
+	return caam_init_common(ctx, &caam_alg->caam);
 }
 
 static void caam_exit_common(struct caam_ctx *ctx)
@@ -2604,7 +2191,8 @@ static void caam_exit_common(struct caam_ctx *ctx)
 	caam_drv_ctx_rel(ctx->drv_ctx[DECRYPT]);
 	caam_drv_ctx_rel(ctx->drv_ctx[GIVENCRYPT]);
 
-	dma_unmap_single(ctx->jrdev, ctx->key_dma, sizeof(ctx->key), ctx->dir);
+	dma_unmap_single(ctx->jrdev, ctx->key_dma, sizeof(ctx->key),
+			 DMA_TO_DEVICE);
 
 	caam_jr_free(ctx->jrdev);
 }
@@ -2728,11 +2316,6 @@ static int __init caam_qi_algapi_init(void)
 	 */
 	if (!priv || !priv->qi_present)
 		return -ENODEV;
-
-	if (caam_dpaa2) {
-		dev_info(ctrldev, "caam/qi frontend driver not suitable for DPAA 2.x, aborting...\n");
-		return -ENODEV;
-	}
 
 	INIT_LIST_HEAD(&alg_list);
 

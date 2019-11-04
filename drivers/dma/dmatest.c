@@ -74,11 +74,7 @@ MODULE_PARM_DESC(timeout, "Transfer Timeout in msec (default: 3000), "
 
 static bool noverify;
 module_param(noverify, bool, S_IRUGO | S_IWUSR);
-MODULE_PARM_DESC(noverify, "Disable data verification (default: verify)");
-
-static bool norandom;
-module_param(norandom, bool, 0644);
-MODULE_PARM_DESC(norandom, "Disable random offset setup (default: random)");
+MODULE_PARM_DESC(noverify, "Disable random data setup and verification");
 
 static bool verbose;
 module_param(verbose, bool, S_IRUGO | S_IWUSR);
@@ -107,7 +103,6 @@ struct dmatest_params {
 	unsigned int	pq_sources;
 	int		timeout;
 	bool		noverify;
-	bool		norandom;
 };
 
 /**
@@ -468,8 +463,6 @@ static int dmatest_func(void *data)
 	unsigned long long	total_len = 0;
 	u8			align = 0;
 	bool			is_memset = false;
-	dma_addr_t		*srcs;
-	dma_addr_t		*dma_pq;
 
 	set_freezable();
 
@@ -553,14 +546,6 @@ static int dmatest_func(void *data)
 
 	set_user_nice(current, 10);
 
-	srcs = kcalloc(src_cnt, sizeof(dma_addr_t), GFP_KERNEL);
-	if (!srcs)
-		goto err_dstbuf;
-
-	dma_pq = kcalloc(dst_cnt, sizeof(dma_addr_t), GFP_KERNEL);
-	if (!dma_pq)
-		goto err_srcs_array;
-
 	/*
 	 * src and dst buffers are freed by ourselves below
 	 */
@@ -571,6 +556,7 @@ static int dmatest_func(void *data)
 	       && !(params->iterations && total_tests >= params->iterations)) {
 		struct dma_async_tx_descriptor *tx = NULL;
 		struct dmaengine_unmap_data *um;
+		dma_addr_t srcs[src_cnt];
 		dma_addr_t *dsts;
 		unsigned int src_off, dst_off, len;
 
@@ -589,7 +575,7 @@ static int dmatest_func(void *data)
 			break;
 		}
 
-		if (params->norandom)
+		if (params->noverify)
 			len = params->buf_size;
 		else
 			len = dmatest_random() % params->buf_size + 1;
@@ -600,19 +586,17 @@ static int dmatest_func(void *data)
 
 		total_len += len;
 
-		if (params->norandom) {
+		if (params->noverify) {
 			src_off = 0;
 			dst_off = 0;
 		} else {
+			start = ktime_get();
 			src_off = dmatest_random() % (params->buf_size - len + 1);
 			dst_off = dmatest_random() % (params->buf_size - len + 1);
 
 			src_off = (src_off >> align) << align;
 			dst_off = (dst_off >> align) << align;
-		}
 
-		if (!params->noverify) {
-			start = ktime_get();
 			dmatest_init_srcs(thread->srcs, src_off, len,
 					  params->buf_size, is_memset);
 			dmatest_init_dsts(thread->dsts, dst_off, len,
@@ -642,9 +626,11 @@ static int dmatest_func(void *data)
 			srcs[i] = um->addr[i] + src_off;
 			ret = dma_mapping_error(dev->dev, um->addr[i]);
 			if (ret) {
+				dmaengine_unmap_put(um);
 				result("src mapping error", total_tests,
 				       src_off, dst_off, len, ret);
-				goto error_unmap_continue;
+				failed_tests++;
+				continue;
 			}
 			um->to_cnt++;
 		}
@@ -659,9 +645,11 @@ static int dmatest_func(void *data)
 					       DMA_BIDIRECTIONAL);
 			ret = dma_mapping_error(dev->dev, dsts[i]);
 			if (ret) {
+				dmaengine_unmap_put(um);
 				result("dst mapping error", total_tests,
 				       src_off, dst_off, len, ret);
-				goto error_unmap_continue;
+				failed_tests++;
+				continue;
 			}
 			um->bidi_cnt++;
 		}
@@ -681,6 +669,8 @@ static int dmatest_func(void *data)
 						      srcs, src_cnt,
 						      len, flags);
 		else if (thread->type == DMA_PQ) {
+			dma_addr_t dma_pq[dst_cnt];
+
 			for (i = 0; i < dst_cnt; i++)
 				dma_pq[i] = dsts[i] + dst_off;
 			tx = dev->device_prep_dma_pq(chan, dma_pq, srcs,
@@ -689,10 +679,12 @@ static int dmatest_func(void *data)
 		}
 
 		if (!tx) {
+			dmaengine_unmap_put(um);
 			result("prep error", total_tests, src_off,
 			       dst_off, len, ret);
 			msleep(100);
-			goto error_unmap_continue;
+			failed_tests++;
+			continue;
 		}
 
 		done->done = false;
@@ -701,10 +693,12 @@ static int dmatest_func(void *data)
 		cookie = tx->tx_submit(tx);
 
 		if (dma_submit_error(cookie)) {
+			dmaengine_unmap_put(um);
 			result("submit error", total_tests, src_off,
 			       dst_off, len, ret);
 			msleep(100);
-			goto error_unmap_continue;
+			failed_tests++;
+			continue;
 		}
 		dma_async_issue_pending(chan);
 
@@ -717,14 +711,16 @@ static int dmatest_func(void *data)
 			dmaengine_unmap_put(um);
 			result("test timed out", total_tests, src_off, dst_off,
 			       len, 0);
-			goto error_unmap_continue;
+			failed_tests++;
+			continue;
 		} else if (status != DMA_COMPLETE) {
 			dmaengine_unmap_put(um);
 			result(status == DMA_ERROR ?
 			       "completion error status" :
 			       "completion busy status", total_tests, src_off,
 			       dst_off, len, ret);
-			goto error_unmap_continue;
+			failed_tests++;
+			continue;
 		}
 
 		dmaengine_unmap_put(um);
@@ -769,12 +765,6 @@ static int dmatest_func(void *data)
 			verbose_result("test passed", total_tests, src_off,
 				       dst_off, len, 0);
 		}
-
-		continue;
-
-error_unmap_continue:
-		dmaengine_unmap_put(um);
-		failed_tests++;
 	}
 	ktime = ktime_sub(ktime_get(), ktime);
 	ktime = ktime_sub(ktime, comparetime);
@@ -782,9 +772,6 @@ error_unmap_continue:
 	runtime = ktime_to_us(ktime);
 
 	ret = 0;
-	kfree(dma_pq);
-err_srcs_array:
-	kfree(srcs);
 err_dstbuf:
 	for (i = 0; thread->udsts[i]; i++)
 		kfree(thread->udsts[i]);
@@ -988,7 +975,6 @@ static void run_threaded_test(struct dmatest_info *info)
 	params->pq_sources = pq_sources;
 	params->timeout = timeout;
 	params->noverify = noverify;
-	params->norandom = norandom;
 
 	request_channels(info, DMA_MEMCPY);
 	request_channels(info, DMA_MEMSET);

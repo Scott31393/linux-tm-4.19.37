@@ -225,7 +225,7 @@ static struct platform_device *devices[] __initdata = {
 	&kp_device,
 };
 
-static const struct omap_lcd_config perseus2_lcd_config __initconst = {
+static struct omap_lcd_config perseus2_lcd_config __initdata = {
 	.ctrl_name	= "internal",
 };
 

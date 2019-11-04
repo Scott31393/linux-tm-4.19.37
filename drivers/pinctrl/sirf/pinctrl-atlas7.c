@@ -5820,7 +5820,7 @@ static void atlas7_gpio_handle_irq(struct irq_desc *desc)
 				__func__, gc->label,
 				bank->gpio_offset + pin_in_bank);
 			generic_handle_irq(
-				irq_find_mapping(gc->irq.domain,
+				irq_find_mapping(gc->irqdomain,
 					bank->gpio_offset + pin_in_bank));
 		}
 
@@ -5860,7 +5860,7 @@ static int atlas7_gpio_request(struct gpio_chip *chip,
 	if (ret < 0)
 		return ret;
 
-	if (pinctrl_gpio_request(chip->base + gpio))
+	if (pinctrl_request_gpio(chip->base + gpio))
 		return -ENODEV;
 
 	raw_spin_lock_irqsave(&a7gc->lock, flags);
@@ -5890,7 +5890,7 @@ static void atlas7_gpio_free(struct gpio_chip *chip,
 
 	raw_spin_unlock_irqrestore(&a7gc->lock, flags);
 
-	pinctrl_gpio_free(chip->base + gpio);
+	pinctrl_free_gpio(chip->base + gpio);
 }
 
 static int atlas7_gpio_direction_input(struct gpio_chip *chip,

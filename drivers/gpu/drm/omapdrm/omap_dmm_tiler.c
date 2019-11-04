@@ -1,9 +1,10 @@
 /*
  * DMM IOMMU driver support functions for TI OMAP processors.
  *
- * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
  * Author: Rob Clark <rob@ti.com>
  *         Andy Gross <andy.gross@ti.com>
+ *
+ * Copyright (C) 2011 Texas Instruments Incorporated - http://www.ti.com/
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License as
@@ -58,11 +59,11 @@ static DEFINE_SPINLOCK(list_lock);
 	}
 
 static const struct {
-	u32 x_shft;	/* unused X-bits (as part of bpp) */
-	u32 y_shft;	/* unused Y-bits (as part of bpp) */
-	u32 cpp;		/* bytes/chars per pixel */
-	u32 slot_w;	/* width of each slot (in pixels) */
-	u32 slot_h;	/* height of each slot (in pixels) */
+	uint32_t x_shft;	/* unused X-bits (as part of bpp) */
+	uint32_t y_shft;	/* unused Y-bits (as part of bpp) */
+	uint32_t cpp;		/* bytes/chars per pixel */
+	uint32_t slot_w;	/* width of each slot (in pixels) */
+	uint32_t slot_h;	/* height of each slot (in pixels) */
 } geom[TILFMT_NFORMATS] = {
 	[TILFMT_8BIT]  = GEOM(0, 0, 1),
 	[TILFMT_16BIT] = GEOM(0, 1, 2),
@@ -72,7 +73,7 @@ static const struct {
 
 
 /* lookup table for registers w/ per-engine instances */
-static const u32 reg[][4] = {
+static const uint32_t reg[][4] = {
 	[PAT_STATUS] = {DMM_PAT_STATUS__0, DMM_PAT_STATUS__1,
 			DMM_PAT_STATUS__2, DMM_PAT_STATUS__3},
 	[PAT_DESCR]  = {DMM_PAT_DESCR__0, DMM_PAT_DESCR__1,
@@ -111,31 +112,23 @@ static void *alloc_dma(struct dmm_txn *txn, size_t sz, dma_addr_t *pa)
 }
 
 /* check status and spin until wait_mask comes true */
-static int wait_status(struct refill_engine *engine, u32 wait_mask)
+static int wait_status(struct refill_engine *engine, uint32_t wait_mask)
 {
 	struct dmm *dmm = engine->dmm;
-	u32 r = 0, err, i;
+	uint32_t r = 0, err, i;
 
 	i = DMM_FIXED_RETRY_COUNT;
 	while (true) {
 		r = dmm_read(dmm, reg[PAT_STATUS][engine->id]);
 		err = r & DMM_PATSTATUS_ERR;
-		if (err) {
-			dev_err(dmm->dev,
-				"%s: error (engine%d). PAT_STATUS: 0x%08x\n",
-				__func__, engine->id, r);
+		if (err)
 			return -EFAULT;
-		}
 
 		if ((r & wait_mask) == wait_mask)
 			break;
 
-		if (--i == 0) {
-			dev_err(dmm->dev,
-				"%s: timeout (engine%d). PAT_STATUS: 0x%08x\n",
-				__func__, engine->id, r);
+		if (--i == 0)
 			return -ETIMEDOUT;
-		}
 
 		udelay(1);
 	}
@@ -158,18 +151,13 @@ static void release_engine(struct refill_engine *engine)
 static irqreturn_t omap_dmm_irq_handler(int irq, void *arg)
 {
 	struct dmm *dmm = arg;
-	u32 status = dmm_read(dmm, DMM_PAT_IRQSTATUS);
+	uint32_t status = dmm_read(dmm, DMM_PAT_IRQSTATUS);
 	int i;
 
 	/* ack IRQ */
 	dmm_write(dmm, status, DMM_PAT_IRQSTATUS);
 
 	for (i = 0; i < dmm->num_engines; i++) {
-		if (status & DMM_IRQSTAT_ERR_MASK)
-			dev_err(dmm->dev,
-				"irq error(engine%d): IRQSTAT 0x%02x\n",
-				i, status & 0xff);
-
 		if (status & DMM_IRQSTAT_LST) {
 			if (dmm->engines[i].async)
 				release_engine(&dmm->engines[i]);
@@ -226,10 +214,10 @@ static struct dmm_txn *dmm_txn_init(struct dmm *dmm, struct tcm *tcm)
  * corresponding slot is cleared (ie. dummy_pa is programmed)
  */
 static void dmm_txn_append(struct dmm_txn *txn, struct pat_area *area,
-		struct page **pages, u32 npages, u32 roll)
+		struct page **pages, uint32_t npages, uint32_t roll)
 {
 	dma_addr_t pat_pa = 0, data_pa = 0;
-	u32 *data;
+	uint32_t *data;
 	struct pat *pat;
 	struct refill_engine *engine = txn->engine_handle;
 	int columns = (1 + area->x1 - area->x0);
@@ -239,7 +227,7 @@ static void dmm_txn_append(struct dmm_txn *txn, struct pat_area *area,
 	pat = alloc_dma(txn, sizeof(*pat), &pat_pa);
 
 	if (txn->last_pat)
-		txn->last_pat->next_pa = (u32)pat_pa;
+		txn->last_pat->next_pa = (uint32_t)pat_pa;
 
 	pat->area = *area;
 
@@ -285,17 +273,6 @@ static int dmm_txn_commit(struct dmm_txn *txn, bool wait)
 	}
 
 	txn->last_pat->next_pa = 0;
-	/* ensure that the written descriptors are visible to DMM */
-	wmb();
-
-	/*
-	 * NOTE: the wmb() above should be enough, but there seems to be a bug
-	 * in OMAP's memory barrier implementation, which in some rare cases may
-	 * cause the writes not to be observable after wmb().
-	 */
-
-	/* read back to ensure the data is in RAM */
-	readl(&txn->last_pat->next_pa);
 
 	/* write to PAT_DESCR to clear out any pending transaction */
 	dmm_write(dmm, 0x0, reg[PAT_DESCR][engine->id]);
@@ -341,7 +318,7 @@ cleanup:
  * DMM programming
  */
 static int fill(struct tcm_area *area, struct page **pages,
-		u32 npages, u32 roll, bool wait)
+		uint32_t npages, uint32_t roll, bool wait)
 {
 	int ret = 0;
 	struct tcm_area slice, area_s;
@@ -389,7 +366,7 @@ static int fill(struct tcm_area *area, struct page **pages,
 /* note: slots for which pages[i] == NULL are filled w/ dummy page
  */
 int tiler_pin(struct tiler_block *block, struct page **pages,
-		u32 npages, u32 roll, bool wait)
+		uint32_t npages, uint32_t roll, bool wait)
 {
 	int ret;
 
@@ -409,8 +386,8 @@ int tiler_unpin(struct tiler_block *block)
 /*
  * Reserve/release
  */
-struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, u16 w,
-		u16 h, u16 align)
+struct tiler_block *tiler_reserve_2d(enum tiler_fmt fmt, uint16_t w,
+		uint16_t h, uint16_t align)
 {
 	struct tiler_block *block;
 	u32 min_align = 128;
@@ -557,8 +534,8 @@ dma_addr_t tiler_ssptr(struct tiler_block *block)
 			block->area.p0.y * geom[block->fmt].slot_h);
 }
 
-dma_addr_t tiler_tsptr(struct tiler_block *block, u32 orient,
-		u32 x, u32 y)
+dma_addr_t tiler_tsptr(struct tiler_block *block, uint32_t orient,
+		uint32_t x, uint32_t y)
 {
 	struct tcm_pt *p = &block->area.p0;
 	BUG_ON(!validfmt(block->fmt));
@@ -568,14 +545,14 @@ dma_addr_t tiler_tsptr(struct tiler_block *block, u32 orient,
 			(p->y * geom[block->fmt].slot_h) + y);
 }
 
-void tiler_align(enum tiler_fmt fmt, u16 *w, u16 *h)
+void tiler_align(enum tiler_fmt fmt, uint16_t *w, uint16_t *h)
 {
 	BUG_ON(!validfmt(fmt));
 	*w = round_up(*w, geom[fmt].slot_w);
 	*h = round_up(*h, geom[fmt].slot_h);
 }
 
-u32 tiler_stride(enum tiler_fmt fmt, u32 orient)
+uint32_t tiler_stride(enum tiler_fmt fmt, uint32_t orient)
 {
 	BUG_ON(!validfmt(fmt));
 
@@ -585,19 +562,19 @@ u32 tiler_stride(enum tiler_fmt fmt, u32 orient)
 		return 1 << (CONT_WIDTH_BITS + geom[fmt].y_shft);
 }
 
-size_t tiler_size(enum tiler_fmt fmt, u16 w, u16 h)
+size_t tiler_size(enum tiler_fmt fmt, uint16_t w, uint16_t h)
 {
 	tiler_align(fmt, &w, &h);
 	return geom[fmt].cpp * w * h;
 }
 
-size_t tiler_vsize(enum tiler_fmt fmt, u16 w, u16 h)
+size_t tiler_vsize(enum tiler_fmt fmt, uint16_t w, uint16_t h)
 {
 	BUG_ON(!validfmt(fmt));
 	return round_up(geom[fmt].cpp * w, PAGE_SIZE) * h;
 }
 
-u32 tiler_get_cpu_cache_flags(void)
+uint32_t tiler_get_cpu_cache_flags(void)
 {
 	return omap_dmm->plat_data->cpu_cache_flags;
 }
@@ -951,8 +928,8 @@ int tiler_map_show(struct seq_file *s, void *arg)
 	h_adj = omap_dmm->container_height / ydiv;
 	w_adj = omap_dmm->container_width / xdiv;
 
-	map = kmalloc_array(h_adj, sizeof(*map), GFP_KERNEL);
-	global_map = kmalloc_array(w_adj + 1, h_adj, GFP_KERNEL);
+	map = kmalloc(h_adj * sizeof(*map), GFP_KERNEL);
+	global_map = kmalloc((w_adj + 1) * h_adj, GFP_KERNEL);
 
 	if (!map || !global_map)
 		goto error;

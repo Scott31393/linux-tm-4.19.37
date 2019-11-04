@@ -1,10 +1,13 @@
-// SPDX-License-Identifier: GPL-2.0
-//
-// Renesas R-Car
-//
-// Copyright (C) 2013 Renesas Solutions Corp.
-// Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
-
+/*
+ * Renesas R-Car
+ *
+ * Copyright (C) 2013 Renesas Solutions Corp.
+ * Kuninori Morimoto <kuninori.morimoto.gx@renesas.com>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ */
 #ifndef RSND_H
 #define RSND_H
 
@@ -280,9 +283,6 @@ struct rsnd_mod_ops {
 	int (*nolock_stop)(struct rsnd_mod *mod,
 		    struct rsnd_dai_stream *io,
 		    struct rsnd_priv *priv);
-	int (*prepare)(struct rsnd_mod *mod,
-		       struct rsnd_dai_stream *io,
-		       struct rsnd_priv *priv);
 };
 
 struct rsnd_dai_stream;
@@ -312,7 +312,6 @@ struct rsnd_mod {
  * H	0: fallback
  * H	0: hw_params
  * H	0: pointer
- * H	0: prepare
  */
 #define __rsnd_mod_shift_nolock_start	0
 #define __rsnd_mod_shift_nolock_stop	0
@@ -327,7 +326,6 @@ struct rsnd_mod {
 #define __rsnd_mod_shift_fallback	28 /* always called */
 #define __rsnd_mod_shift_hw_params	28 /* always called */
 #define __rsnd_mod_shift_pointer	28 /* always called */
-#define __rsnd_mod_shift_prepare	28 /* always called */
 
 #define __rsnd_mod_add_probe		0
 #define __rsnd_mod_add_remove		0
@@ -342,7 +340,6 @@ struct rsnd_mod {
 #define __rsnd_mod_add_fallback		0
 #define __rsnd_mod_add_hw_params	0
 #define __rsnd_mod_add_pointer		0
-#define __rsnd_mod_add_prepare		0
 
 #define __rsnd_mod_call_probe		0
 #define __rsnd_mod_call_remove		0
@@ -357,11 +354,9 @@ struct rsnd_mod {
 #define __rsnd_mod_call_pointer		0
 #define __rsnd_mod_call_nolock_start	0
 #define __rsnd_mod_call_nolock_stop	1
-#define __rsnd_mod_call_prepare		0
 
-#define rsnd_mod_to_priv(mod)	((mod)->priv)
-#define rsnd_mod_name(mod)	((mod)->ops->name)
-#define rsnd_mod_id(mod)	((mod)->id)
+#define rsnd_mod_to_priv(mod) ((mod)->priv)
+#define rsnd_mod_id(mod) ((mod) ? (mod)->id : -1)
 #define rsnd_mod_power_on(mod)	clk_enable((mod)->clk)
 #define rsnd_mod_power_off(mod)	clk_disable((mod)->clk)
 #define rsnd_mod_get(ip)	(&(ip)->mod)
@@ -376,6 +371,7 @@ int rsnd_mod_init(struct rsnd_priv *priv,
 		  enum rsnd_mod_type type,
 		  int id);
 void rsnd_mod_quit(struct rsnd_mod *mod);
+char *rsnd_mod_name(struct rsnd_mod *mod);
 struct dma_chan *rsnd_mod_dma_req(struct rsnd_dai_stream *io,
 				  struct rsnd_mod *mod);
 void rsnd_mod_interrupt(struct rsnd_mod *mod,
@@ -403,18 +399,9 @@ void rsnd_parse_connect_common(struct rsnd_dai *rdai,
 		struct device_node *playback,
 		struct device_node *capture);
 
-#define rsnd_runtime_channel_original(io) \
-	rsnd_runtime_channel_original_with_params(io, NULL)
-int rsnd_runtime_channel_original_with_params(struct rsnd_dai_stream *io,
-				struct snd_pcm_hw_params *params);
-#define rsnd_runtime_channel_after_ctu(io)			\
-	rsnd_runtime_channel_after_ctu_with_params(io, NULL)
-int rsnd_runtime_channel_after_ctu_with_params(struct rsnd_dai_stream *io,
-				struct snd_pcm_hw_params *params);
-#define rsnd_runtime_channel_for_ssi(io) \
-	rsnd_runtime_channel_for_ssi_with_params(io, NULL)
-int rsnd_runtime_channel_for_ssi_with_params(struct rsnd_dai_stream *io,
-				 struct snd_pcm_hw_params *params);
+int rsnd_runtime_channel_original(struct rsnd_dai_stream *io);
+int rsnd_runtime_channel_after_ctu(struct rsnd_dai_stream *io);
+int rsnd_runtime_channel_for_ssi(struct rsnd_dai_stream *io);
 int rsnd_runtime_is_ssi_multi(struct rsnd_dai_stream *io);
 int rsnd_runtime_is_ssi_tdm(struct rsnd_dai_stream *io);
 
@@ -439,7 +426,6 @@ struct rsnd_dai_stream {
 	struct snd_pcm_substream *substream;
 	struct rsnd_mod *mod[RSND_MOD_MAX];
 	struct rsnd_dai *rdai;
-	struct device *dmac_dev; /* for IPMMU */
 	u32 parent_ssi_status;
 };
 #define rsnd_io_to_mod(io, i)	((i) < RSND_MOD_MAX ? (io)->mod[(i)] : NULL)
@@ -543,7 +529,6 @@ struct rsnd_priv {
 #define RSND_GEN_MASK	(0xF << 0)
 #define RSND_GEN1	(1 << 0)
 #define RSND_GEN2	(2 << 0)
-#define RSND_GEN3	(3 << 0)
 
 	/*
 	 * below value will be filled on rsnd_gen_probe()
@@ -615,11 +600,6 @@ struct rsnd_priv {
 
 #define rsnd_is_gen1(priv)	(((priv)->flags & RSND_GEN_MASK) == RSND_GEN1)
 #define rsnd_is_gen2(priv)	(((priv)->flags & RSND_GEN_MASK) == RSND_GEN2)
-#define rsnd_is_gen3(priv)	(((priv)->flags & RSND_GEN_MASK) == RSND_GEN3)
-
-#define rsnd_flags_has(p, f) ((p)->flags & (f))
-#define rsnd_flags_set(p, f) ((p)->flags |= (f))
-#define rsnd_flags_del(p, f) ((p)->flags &= ~(f))
 
 /*
  *	rsnd_kctrl
@@ -647,10 +627,6 @@ struct rsnd_kctrl_cfg_s {
 	struct rsnd_kctrl_cfg cfg;
 	u32 val;
 };
-#define rsnd_kctrl_size(x)	((x).cfg.size)
-#define rsnd_kctrl_max(x)	((x).cfg.max)
-#define rsnd_kctrl_valm(x, i)	((x).val[i])	/* = (x).cfg.val[i] */
-#define rsnd_kctrl_vals(x)	((x).val)	/* = (x).cfg.val[0] */
 
 int rsnd_kctrl_accept_anytime(struct rsnd_dai_stream *io);
 int rsnd_kctrl_accept_runtime(struct rsnd_dai_stream *io);
@@ -676,13 +652,9 @@ int rsnd_kctrl_new(struct rsnd_mod *mod,
 	rsnd_kctrl_new(mod, io, rtd, name, accept, update, rsnd_kctrl_init_s(cfg), \
 		       NULL, 1, max)
 
-#define rsnd_kctrl_new_e(mod, io, rtd, name, accept, update, cfg, texts, size) \
+#define rsnd_kctrl_new_e(mod, io, rtd, name, accept, update, cfg, texts)	\
 	rsnd_kctrl_new(mod, io, rtd, name, accept, update, rsnd_kctrl_init_s(cfg), \
-		       texts, 1, size)
-
-extern const char * const volume_ramp_rate[];
-#define VOLUME_RAMP_MAX_DVC	(0x17 + 1)
-#define VOLUME_RAMP_MAX_MIX	(0x0a + 1)
+		       texts, 1, ARRAY_SIZE(texts))
 
 /*
  *	R-Car SSI
@@ -782,6 +754,7 @@ struct rsnd_mod *rsnd_dvc_mod_get(struct rsnd_priv *priv, int id);
 int rsnd_cmd_probe(struct rsnd_priv *priv);
 void rsnd_cmd_remove(struct rsnd_priv *priv);
 int rsnd_cmd_attach(struct rsnd_dai_stream *io, int id);
+struct rsnd_mod *rsnd_cmd_mod_get(struct rsnd_priv *priv, int id);
 
 void rsnd_mod_make_sure(struct rsnd_mod *mod, enum rsnd_mod_type type);
 #ifdef DEBUG
@@ -793,25 +766,5 @@ void rsnd_mod_make_sure(struct rsnd_mod *mod, enum rsnd_mod_type type);
 #define rsnd_mod_confirm_src(msrc)
 #define rsnd_mod_confirm_dvc(mdvc)
 #endif
-
-/*
- * If you don't need interrupt status debug message,
- * define RSND_DEBUG_NO_IRQ_STATUS as 1 on top of src.c/ssi.c
- *
- * #define RSND_DEBUG_NO_IRQ_STATUS 1
- */
-#define rsnd_dbg_irq_status(dev, param...)		\
-	if (!IS_BUILTIN(RSND_DEBUG_NO_IRQ_STATUS))	\
-		dev_dbg(dev, param)
-
-/*
- * If you don't need rsnd_dai_call debug message,
- * define RSND_DEBUG_NO_DAI_CALL as 1 on top of core.c
- *
- * #define RSND_DEBUG_NO_DAI_CALL 1
- */
-#define rsnd_dbg_dai_call(dev, param...)		\
-	if (!IS_BUILTIN(RSND_DEBUG_NO_DAI_CALL))	\
-		dev_dbg(dev, param)
 
 #endif

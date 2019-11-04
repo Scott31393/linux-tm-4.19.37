@@ -352,9 +352,8 @@ int genl_register_family(struct genl_family *family)
 	}
 
 	if (family->maxattr && !family->parallel_ops) {
-		family->attrbuf = kmalloc_array(family->maxattr + 1,
-						sizeof(struct nlattr *),
-						GFP_KERNEL);
+		family->attrbuf = kmalloc((family->maxattr+1) *
+					sizeof(struct nlattr *), GFP_KERNEL);
 		if (family->attrbuf == NULL) {
 			err = -ENOMEM;
 			goto errout_locked;
@@ -366,7 +365,7 @@ int genl_register_family(struct genl_family *family)
 			       start, end + 1, GFP_KERNEL);
 	if (family->id < 0) {
 		err = family->id;
-		goto errout_free;
+		goto errout_locked;
 	}
 
 	err = genl_validate_assign_mc_groups(family);
@@ -385,7 +384,6 @@ int genl_register_family(struct genl_family *family)
 
 errout_remove:
 	idr_remove(&genl_fam_idr, family->id);
-errout_free:
 	kfree(family->attrbuf);
 errout_locked:
 	genl_unlock_all();
@@ -568,9 +566,8 @@ static int genl_family_rcv_msg(const struct genl_family *family,
 		return -EOPNOTSUPP;
 
 	if (family->maxattr && family->parallel_ops) {
-		attrbuf = kmalloc_array(family->maxattr + 1,
-					sizeof(struct nlattr *),
-					GFP_KERNEL);
+		attrbuf = kmalloc((family->maxattr+1) *
+					sizeof(struct nlattr *), GFP_KERNEL);
 		if (attrbuf == NULL)
 			return -ENOMEM;
 	} else

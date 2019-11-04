@@ -932,6 +932,7 @@ err_unlock:
 
 static const struct iio_info cpcap_adc_info = {
 	.read_raw = &cpcap_adc_read,
+	.driver_module = THIS_MODULE,
 };
 
 /*

@@ -27,6 +27,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/mman.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <errno.h>
@@ -96,7 +97,7 @@ static void skip(int size)
 	};
 }
 
-static unsigned int read4(struct tep_handle *pevent)
+static unsigned int read4(struct pevent *pevent)
 {
 	unsigned int data;
 
@@ -105,7 +106,7 @@ static unsigned int read4(struct tep_handle *pevent)
 	return __data2host4(pevent, data);
 }
 
-static unsigned long long read8(struct tep_handle *pevent)
+static unsigned long long read8(struct pevent *pevent)
 {
 	unsigned long long data;
 
@@ -158,7 +159,7 @@ out:
 	return str;
 }
 
-static int read_proc_kallsyms(struct tep_handle *pevent)
+static int read_proc_kallsyms(struct pevent *pevent)
 {
 	unsigned int size;
 
@@ -181,7 +182,7 @@ static int read_proc_kallsyms(struct tep_handle *pevent)
 	return 0;
 }
 
-static int read_ftrace_printk(struct tep_handle *pevent)
+static int read_ftrace_printk(struct pevent *pevent)
 {
 	unsigned int size;
 	char *buf;
@@ -208,7 +209,7 @@ static int read_ftrace_printk(struct tep_handle *pevent)
 	return 0;
 }
 
-static int read_header_files(struct tep_handle *pevent)
+static int read_header_files(struct pevent *pevent)
 {
 	unsigned long long size;
 	char *header_page;
@@ -235,13 +236,13 @@ static int read_header_files(struct tep_handle *pevent)
 		return -1;
 	}
 
-	if (!tep_parse_header_page(pevent, header_page, size,
-				   tep_get_long_size(pevent))) {
+	if (!pevent_parse_header_page(pevent, header_page, size,
+				      pevent_get_long_size(pevent))) {
 		/*
 		 * The commit field in the page is of type long,
 		 * use that instead, since it represents the kernel.
 		 */
-		tep_set_long_size(pevent, pevent->header_page_size_size);
+		pevent_set_long_size(pevent, pevent->header_page_size_size);
 	}
 	free(header_page);
 
@@ -259,7 +260,7 @@ static int read_header_files(struct tep_handle *pevent)
 	return ret;
 }
 
-static int read_ftrace_file(struct tep_handle *pevent, unsigned long long size)
+static int read_ftrace_file(struct pevent *pevent, unsigned long long size)
 {
 	int ret;
 	char *buf;
@@ -284,8 +285,8 @@ out:
 	return ret;
 }
 
-static int read_event_file(struct tep_handle *pevent, char *sys,
-			   unsigned long long size)
+static int read_event_file(struct pevent *pevent, char *sys,
+			    unsigned long long size)
 {
 	int ret;
 	char *buf;
@@ -310,7 +311,7 @@ out:
 	return ret;
 }
 
-static int read_ftrace_files(struct tep_handle *pevent)
+static int read_ftrace_files(struct pevent *pevent)
 {
 	unsigned long long size;
 	int count;
@@ -328,7 +329,7 @@ static int read_ftrace_files(struct tep_handle *pevent)
 	return 0;
 }
 
-static int read_event_files(struct tep_handle *pevent)
+static int read_event_files(struct pevent *pevent)
 {
 	unsigned long long size;
 	char *sys;
@@ -349,17 +350,14 @@ static int read_event_files(struct tep_handle *pevent)
 		for (x=0; x < count; x++) {
 			size = read8(pevent);
 			ret = read_event_file(pevent, sys, size);
-			if (ret) {
-				free(sys);
+			if (ret)
 				return ret;
-			}
 		}
-		free(sys);
 	}
 	return 0;
 }
 
-static int read_saved_cmdline(struct tep_handle *pevent)
+static int read_saved_cmdline(struct pevent *pevent)
 {
 	unsigned long long size;
 	char *buf;
@@ -402,7 +400,7 @@ ssize_t trace_report(int fd, struct trace_event *tevent, bool __repipe)
 	int host_bigendian;
 	int file_long_size;
 	int file_page_size;
-	struct tep_handle *pevent = NULL;
+	struct pevent *pevent = NULL;
 	int err;
 
 	repipe = __repipe;
@@ -442,9 +440,9 @@ ssize_t trace_report(int fd, struct trace_event *tevent, bool __repipe)
 
 	pevent = tevent->pevent;
 
-	tep_set_flag(pevent, TEP_NSEC_OUTPUT);
-	tep_set_file_bigendian(pevent, file_bigendian);
-	tep_set_host_bigendian(pevent, host_bigendian);
+	pevent_set_flag(pevent, PEVENT_NSEC_OUTPUT);
+	pevent_set_file_bigendian(pevent, file_bigendian);
+	pevent_set_host_bigendian(pevent, host_bigendian);
 
 	if (do_read(buf, 1) < 0)
 		goto out;
@@ -454,8 +452,8 @@ ssize_t trace_report(int fd, struct trace_event *tevent, bool __repipe)
 	if (!file_page_size)
 		goto out;
 
-	tep_set_long_size(pevent, file_long_size);
-	tep_set_page_size(pevent, file_page_size);
+	pevent_set_long_size(pevent, file_long_size);
+	pevent_set_page_size(pevent, file_page_size);
 
 	err = read_header_files(pevent);
 	if (err)
@@ -482,9 +480,9 @@ ssize_t trace_report(int fd, struct trace_event *tevent, bool __repipe)
 	repipe = false;
 
 	if (show_funcs) {
-		tep_print_funcs(pevent);
+		pevent_print_funcs(pevent);
 	} else if (show_printk) {
-		tep_print_printk(pevent);
+		pevent_print_printk(pevent);
 	}
 
 	pevent = NULL;

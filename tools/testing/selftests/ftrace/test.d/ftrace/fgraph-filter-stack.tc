@@ -28,7 +28,7 @@ do_reset() {
 fail() { # msg
     do_reset
     echo $1
-    exit_fail
+    exit $FAIL
 }
 
 disable_tracing

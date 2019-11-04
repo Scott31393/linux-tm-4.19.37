@@ -10,7 +10,6 @@ struct stv0910_cfg {
 	u8  parallel;
 	u8  rptlvl;
 	u8  single;
-	u8  tsspeed;
 };
 
 #if IS_REACHABLE(CONFIG_DVB_STV0910)

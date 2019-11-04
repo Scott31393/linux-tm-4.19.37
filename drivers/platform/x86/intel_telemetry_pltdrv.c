@@ -16,9 +16,15 @@
  * It used the PUNIT and PMC IPC interfaces for configuring the counters.
  * The accumulated results are fetched from SRAM.
  */
-
-#include <linux/io.h>
 #include <linux/module.h>
+#include <linux/init.h>
+#include <linux/device.h>
+#include <linux/debugfs.h>
+#include <linux/seq_file.h>
+#include <linux/io.h>
+#include <linux/uaccess.h>
+#include <linux/pci.h>
+#include <linux/suspend.h>
 #include <linux/platform_device.h>
 
 #include <asm/cpu_device_id.h>
@@ -250,7 +256,7 @@ static int telemetry_check_evtid(enum telemetry_unit telem_unit,
 		break;
 
 	default:
-		pr_err("Unknown Telemetry action specified %d\n", action);
+		pr_err("Unknown Telemetry action Specified %d\n", action);
 		return -EINVAL;
 	}
 
@@ -653,7 +659,7 @@ static int telemetry_setup(struct platform_device *pdev)
 	ret = telemetry_setup_evtconfig(pss_evtconfig, ioss_evtconfig,
 					TELEM_RESET);
 	if (ret) {
-		dev_err(&pdev->dev, "TELEMETRY Setup Failed\n");
+		dev_err(&pdev->dev, "TELEMTRY Setup Failed\n");
 		return ret;
 	}
 	return 0;
@@ -679,7 +685,7 @@ static int telemetry_plt_update_events(struct telemetry_evtconfig pss_evtconfig,
 	ret = telemetry_setup_evtconfig(pss_evtconfig, ioss_evtconfig,
 					TELEM_UPDATE);
 	if (ret)
-		pr_err("TELEMETRY Config Failed\n");
+		pr_err("TELEMTRY Config Failed\n");
 
 	return ret;
 }
@@ -816,7 +822,7 @@ static int telemetry_plt_reset_events(void)
 	ret = telemetry_setup_evtconfig(pss_evtconfig, ioss_evtconfig,
 					TELEM_RESET);
 	if (ret)
-		pr_err("TELEMETRY Reset Failed\n");
+		pr_err("TELEMTRY Reset Failed\n");
 
 	return ret;
 }
@@ -879,7 +885,7 @@ static int telemetry_plt_add_events(u8 num_pss_evts, u8 num_ioss_evts,
 	ret = telemetry_setup_evtconfig(pss_evtconfig, ioss_evtconfig,
 					TELEM_ADD);
 	if (ret)
-		pr_err("TELEMETRY ADD Failed\n");
+		pr_err("TELEMTRY ADD Failed\n");
 
 	return ret;
 }
@@ -1189,7 +1195,7 @@ static int telemetry_pltdrv_probe(struct platform_device *pdev)
 
 	ret = telemetry_set_pltdata(&telm_pltops, telm_conf);
 	if (ret) {
-		dev_err(&pdev->dev, "TELEMETRY Set Pltops Failed.\n");
+		dev_err(&pdev->dev, "TELEMTRY Set Pltops Failed.\n");
 		goto out;
 	}
 
@@ -1204,7 +1210,7 @@ out:
 		iounmap(telm_conf->pss_config.regmap);
 	if (telm_conf->ioss_config.regmap)
 		iounmap(telm_conf->ioss_config.regmap);
-	dev_err(&pdev->dev, "TELEMETRY Setup Failed.\n");
+	dev_err(&pdev->dev, "TELEMTRY Setup Failed.\n");
 
 	return ret;
 }
@@ -1228,6 +1234,7 @@ static struct platform_driver telemetry_soc_driver = {
 
 static int __init telemetry_module_init(void)
 {
+	pr_info(DRIVER_NAME ": version %s loaded\n", DRIVER_VERSION);
 	return platform_driver_register(&telemetry_soc_driver);
 }
 

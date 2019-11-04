@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * drivers/usb/generic.c - generic driver for USB devices (not interfaces)
  *
@@ -17,6 +16,7 @@
  *	(C) Copyright Greg Kroah-Hartman 2002-2003
  *
  * Released under the GPLv2 only.
+ * SPDX-License-Identifier: GPL-2.0
  */
 
 #include <linux/usb.h>
@@ -154,7 +154,6 @@ int usb_choose_configuration(struct usb_device *udev)
 		dev_warn(&udev->dev,
 			"no configuration chosen from %d choice%s\n",
 			num_configs, plural(num_configs));
-		dev_warn(&udev->dev, "No support over %dmA\n", udev->bus_mA);
 	}
 	return i;
 }

@@ -86,19 +86,16 @@ EXPORT_SYMBOL_GPL(init_srcu_struct);
  * Must invoke this after you are finished using a given srcu_struct that
  * was initialized via init_srcu_struct(), else you leak memory.
  */
-void _cleanup_srcu_struct(struct srcu_struct *sp, bool quiesced)
+void cleanup_srcu_struct(struct srcu_struct *sp)
 {
 	WARN_ON(sp->srcu_lock_nesting[0] || sp->srcu_lock_nesting[1]);
-	if (quiesced)
-		WARN_ON(work_pending(&sp->srcu_work));
-	else
-		flush_work(&sp->srcu_work);
+	flush_work(&sp->srcu_work);
 	WARN_ON(sp->srcu_gp_running);
 	WARN_ON(sp->srcu_gp_waiting);
 	WARN_ON(sp->srcu_cb_head);
 	WARN_ON(&sp->srcu_cb_head != sp->srcu_cb_tail);
 }
-EXPORT_SYMBOL_GPL(_cleanup_srcu_struct);
+EXPORT_SYMBOL_GPL(cleanup_srcu_struct);
 
 /*
  * Removes the count for the old reader from the appropriate element of
@@ -110,7 +107,7 @@ void __srcu_read_unlock(struct srcu_struct *sp, int idx)
 
 	WRITE_ONCE(sp->srcu_lock_nesting[idx], newval);
 	if (!newval && READ_ONCE(sp->srcu_gp_waiting))
-		swake_up_one(&sp->srcu_wq);
+		swake_up(&sp->srcu_wq);
 }
 EXPORT_SYMBOL_GPL(__srcu_read_unlock);
 
@@ -140,7 +137,7 @@ void srcu_drive_gp(struct work_struct *wp)
 	idx = sp->srcu_idx;
 	WRITE_ONCE(sp->srcu_idx, !sp->srcu_idx);
 	WRITE_ONCE(sp->srcu_gp_waiting, true);  /* srcu_read_unlock() wakes! */
-	swait_event_exclusive(sp->srcu_wq, !READ_ONCE(sp->srcu_lock_nesting[idx]));
+	swait_event(sp->srcu_wq, !READ_ONCE(sp->srcu_lock_nesting[idx]));
 	WRITE_ONCE(sp->srcu_gp_waiting, false); /* srcu_read_unlock() cheap. */
 
 	/* Invoke the callbacks we removed above. */

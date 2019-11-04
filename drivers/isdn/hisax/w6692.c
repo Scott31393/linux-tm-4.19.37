@@ -188,6 +188,7 @@ W6692_fill_fifo(struct IsdnCardState *cs)
 		debugl1(cs, "W6692_fill_fifo dbusytimer running");
 		del_timer(&cs->dbusytimer);
 	}
+	init_timer(&cs->dbusytimer);
 	cs->dbusytimer.expires = jiffies + ((DBUSY_TIMER_VALUE * HZ) / 1000);
 	add_timer(&cs->dbusytimer);
 	if (cs->debug & L1_DEB_ISAC_FIFO) {
@@ -683,9 +684,8 @@ DC_Close_W6692(struct IsdnCardState *cs)
 }
 
 static void
-dbusy_timer_handler(struct timer_list *t)
+dbusy_timer_handler(struct IsdnCardState *cs)
 {
-	struct IsdnCardState *cs = from_timer(cs, t, dbusytimer);
 	struct PStack *stptr;
 	int rbch, star;
 	u_long flags;
@@ -904,7 +904,8 @@ static void initW6692(struct IsdnCardState *cs, int part)
 	if (part & 1) {
 		cs->setstack_d = setstack_W6692;
 		cs->DC_Close = DC_Close_W6692;
-		timer_setup(&cs->dbusytimer, dbusy_timer_handler, 0);
+		setup_timer(&cs->dbusytimer, (void *)dbusy_timer_handler,
+			    (long)cs);
 		resetW6692(cs);
 		ph_command(cs, W_L1CMD_RST);
 		cs->dc.w6692.ph_state = W_L1CMD_RST;

@@ -239,10 +239,10 @@ static unsigned short write_postamble[] = {
 static void seek_track(struct floppy_state *fs, int n);
 static void init_dma(struct dbdma_cmd *cp, int cmd, void *buf, int count);
 static void act(struct floppy_state *fs);
-static void scan_timeout(struct timer_list *t);
-static void seek_timeout(struct timer_list *t);
-static void settle_timeout(struct timer_list *t);
-static void xfer_timeout(struct timer_list *t);
+static void scan_timeout(unsigned long data);
+static void seek_timeout(unsigned long data);
+static void settle_timeout(unsigned long data);
+static void xfer_timeout(unsigned long data);
 static irqreturn_t swim3_interrupt(int irq, void *dev_id);
 /*static void fd_dma_interrupt(int irq, void *dev_id);*/
 static int grab_drive(struct floppy_state *fs, enum swim_state state,
@@ -392,12 +392,13 @@ static void do_fd_request(struct request_queue * q)
 }
 
 static void set_timeout(struct floppy_state *fs, int nticks,
-			void (*proc)(struct timer_list *t))
+			void (*proc)(unsigned long))
 {
 	if (fs->timeout_pending)
 		del_timer(&fs->timeout);
 	fs->timeout.expires = jiffies + nticks;
 	fs->timeout.function = proc;
+	fs->timeout.data = (unsigned long) fs;
 	add_timer(&fs->timeout);
 	fs->timeout_pending = 1;
 }
@@ -568,9 +569,9 @@ static void act(struct floppy_state *fs)
 	}
 }
 
-static void scan_timeout(struct timer_list *t)
+static void scan_timeout(unsigned long data)
 {
-	struct floppy_state *fs = from_timer(fs, t, timeout);
+	struct floppy_state *fs = (struct floppy_state *) data;
 	struct swim3 __iomem *sw = fs->swim3;
 	unsigned long flags;
 
@@ -593,9 +594,9 @@ static void scan_timeout(struct timer_list *t)
 	spin_unlock_irqrestore(&swim3_lock, flags);
 }
 
-static void seek_timeout(struct timer_list *t)
+static void seek_timeout(unsigned long data)
 {
-	struct floppy_state *fs = from_timer(fs, t, timeout);
+	struct floppy_state *fs = (struct floppy_state *) data;
 	struct swim3 __iomem *sw = fs->swim3;
 	unsigned long flags;
 
@@ -613,9 +614,9 @@ static void seek_timeout(struct timer_list *t)
 	spin_unlock_irqrestore(&swim3_lock, flags);
 }
 
-static void settle_timeout(struct timer_list *t)
+static void settle_timeout(unsigned long data)
 {
-	struct floppy_state *fs = from_timer(fs, t, timeout);
+	struct floppy_state *fs = (struct floppy_state *) data;
 	struct swim3 __iomem *sw = fs->swim3;
 	unsigned long flags;
 
@@ -643,9 +644,9 @@ static void settle_timeout(struct timer_list *t)
 	spin_unlock_irqrestore(&swim3_lock, flags);
 }
 
-static void xfer_timeout(struct timer_list *t)
+static void xfer_timeout(unsigned long data)
 {
-	struct floppy_state *fs = from_timer(fs, t, timeout);
+	struct floppy_state *fs = (struct floppy_state *) data;
 	struct swim3 __iomem *sw = fs->swim3;
 	struct dbdma_regs __iomem *dr = fs->dma;
 	unsigned long flags;
@@ -1026,11 +1027,7 @@ static void floppy_release(struct gendisk *disk, fmode_t mode)
 	struct swim3 __iomem *sw = fs->swim3;
 
 	mutex_lock(&swim3_mutex);
-	if (fs->ref_count > 0)
-		--fs->ref_count;
-	else if (fs->ref_count == -1)
-		fs->ref_count = 0;
-	if (fs->ref_count == 0) {
+	if (fs->ref_count > 0 && --fs->ref_count == 0) {
 		swim3_action(fs, MOTOR_OFF);
 		out_8(&sw->control_bic, 0xff);
 		swim3_select(fs, RELAX);
@@ -1185,7 +1182,7 @@ static int swim3_add_device(struct macio_dev *mdev, int index)
 		return -EBUSY;
 	}
 
-	timer_setup(&fs->timeout, NULL, 0);
+	init_timer(&fs->timeout);
 
 	swim3_info("SWIM3 floppy controller %s\n",
 		mdev->media_bay ? "in media bay" : "");

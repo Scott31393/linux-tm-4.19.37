@@ -67,12 +67,17 @@ static LIST_HEAD(bridge_list);
  * drm_bridge_add - add the given bridge to the global bridge list
  *
  * @bridge: bridge control structure
+ *
+ * RETURNS:
+ * Unconditionally returns Zero.
  */
-void drm_bridge_add(struct drm_bridge *bridge)
+int drm_bridge_add(struct drm_bridge *bridge)
 {
 	mutex_lock(&bridge_lock);
 	list_add_tail(&bridge->list, &bridge_list);
 	mutex_unlock(&bridge_lock);
+
+	return 0;
 }
 EXPORT_SYMBOL(drm_bridge_add);
 

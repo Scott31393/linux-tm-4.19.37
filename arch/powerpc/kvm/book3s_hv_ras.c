@@ -87,7 +87,8 @@ static long kvmppc_realmode_mc_power7(struct kvm_vcpu *vcpu)
 				   DSISR_MC_SLB_PARITY | DSISR_MC_DERAT_MULTI);
 		}
 		if (dsisr & DSISR_MC_TLB_MULTI) {
-			tlbiel_all_lpid(vcpu->kvm->arch.radix);
+			if (cur_cpu_spec && cur_cpu_spec->flush_tlb)
+				cur_cpu_spec->flush_tlb(TLB_INVAL_SCOPE_LPID);
 			dsisr &= ~DSISR_MC_TLB_MULTI;
 		}
 		/* Any other errors we don't understand? */
@@ -104,7 +105,8 @@ static long kvmppc_realmode_mc_power7(struct kvm_vcpu *vcpu)
 		reload_slb(vcpu);
 		break;
 	case SRR1_MC_IFETCH_TLBMULTI:
-		tlbiel_all_lpid(vcpu->kvm->arch.radix);
+		if (cur_cpu_spec && cur_cpu_spec->flush_tlb)
+			cur_cpu_spec->flush_tlb(TLB_INVAL_SCOPE_LPID);
 		break;
 	default:
 		handled = 0;
@@ -266,18 +268,16 @@ static void kvmppc_tb_resync_done(void)
  *   secondary threads to proceed.
  * - All secondary threads will eventually call opal hmi handler on
  *   their exit path.
- *
- * Returns 1 if the timebase offset should be applied, 0 if not.
  */
 
 long kvmppc_realmode_hmi_handler(void)
 {
+	int ptid = local_paca->kvm_hstate.ptid;
 	bool resync_req;
 
+	/* This is only called on primary thread. */
+	BUG_ON(ptid != 0);
 	__this_cpu_inc(irq_stat.hmi_exceptions);
-
-	if (hmi_handle_debugtrig(NULL) >= 0)
-		return 1;
 
 	/*
 	 * By now primary thread has already completed guest->host

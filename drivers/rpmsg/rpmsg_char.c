@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2016, Linaro Ltd.
  * Copyright (c) 2012, Michal Simek <monstr@monstr.eu>
@@ -8,6 +7,15 @@
  *
  * Based on rpmsg performance statistics driver by Michal Simek, which in turn
  * was based on TI & Google OMX rpmsg driver.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 #include <linux/cdev.h>
 #include <linux/device.h>
@@ -248,18 +256,18 @@ free_kbuf:
 	return ret < 0 ? ret : len;
 }
 
-static __poll_t rpmsg_eptdev_poll(struct file *filp, poll_table *wait)
+static unsigned int rpmsg_eptdev_poll(struct file *filp, poll_table *wait)
 {
 	struct rpmsg_eptdev *eptdev = filp->private_data;
-	__poll_t mask = 0;
+	unsigned int mask = 0;
 
 	if (!eptdev->ept)
-		return EPOLLERR;
+		return POLLERR;
 
 	poll_wait(filp, &eptdev->readq, wait);
 
 	if (!skb_queue_empty(&eptdev->queue))
-		mask |= EPOLLIN | EPOLLRDNORM;
+		mask |= POLLIN | POLLRDNORM;
 
 	mask |= rpmsg_poll(eptdev->ept, filp, wait);
 
@@ -285,7 +293,6 @@ static const struct file_operations rpmsg_eptdev_fops = {
 	.write = rpmsg_eptdev_write,
 	.poll = rpmsg_eptdev_poll,
 	.unlocked_ioctl = rpmsg_eptdev_ioctl,
-	.compat_ioctl = rpmsg_eptdev_ioctl,
 };
 
 static ssize_t name_show(struct device *dev, struct device_attribute *attr,
@@ -446,7 +453,6 @@ static const struct file_operations rpmsg_ctrldev_fops = {
 	.open = rpmsg_ctrldev_open,
 	.release = rpmsg_ctrldev_release,
 	.unlocked_ioctl = rpmsg_ctrldev_ioctl,
-	.compat_ioctl = rpmsg_ctrldev_ioctl,
 };
 
 static void rpmsg_ctrldev_release_device(struct device *dev)

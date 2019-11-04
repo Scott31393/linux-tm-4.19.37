@@ -30,14 +30,12 @@ static int get_temp(char *path)
 static int session_write_header(char *path)
 {
 	struct perf_session *session;
-	struct perf_data data = {
-		.file      = {
-			.path = path,
-		},
-		.mode      = PERF_DATA_MODE_WRITE,
+	struct perf_data_file file = {
+		.path = path,
+		.mode = PERF_DATA_MODE_WRITE,
 	};
 
-	session = perf_session__new(&data, false, NULL);
+	session = perf_session__new(&file, false, NULL);
 	TEST_ASSERT_VAL("can't get session", session);
 
 	session->evlist = perf_evlist__new_default();
@@ -45,12 +43,11 @@ static int session_write_header(char *path)
 
 	perf_header__set_feat(&session->header, HEADER_CPU_TOPOLOGY);
 	perf_header__set_feat(&session->header, HEADER_NRCPUS);
-	perf_header__set_feat(&session->header, HEADER_ARCH);
 
 	session->header.data_size += DATA_SIZE;
 
 	TEST_ASSERT_VAL("failed to write header",
-			!perf_session__write_header(session, session->evlist, data.file.fd, true));
+			!perf_session__write_header(session, session->evlist, file.fd, true));
 
 	perf_session__delete(session);
 
@@ -60,15 +57,13 @@ static int session_write_header(char *path)
 static int check_cpu_topology(char *path, struct cpu_map *map)
 {
 	struct perf_session *session;
-	struct perf_data data = {
-		.file      = {
-			.path = path,
-		},
-		.mode      = PERF_DATA_MODE_READ,
+	struct perf_data_file file = {
+		.path = path,
+		.mode = PERF_DATA_MODE_READ,
 	};
 	int i;
 
-	session = perf_session__new(&data, false, NULL);
+	session = perf_session__new(&file, false, NULL);
 	TEST_ASSERT_VAL("can't get session", session);
 
 	/* On platforms with large numbers of CPUs process_cpu_topology()

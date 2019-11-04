@@ -53,7 +53,7 @@ static int coreboot_table_acpi_probe(struct platform_device *pdev)
 	if (!ptr)
 		return -ENOMEM;
 
-	return coreboot_table_init(&pdev->dev, ptr);
+	return coreboot_table_init(ptr);
 }
 
 static int coreboot_table_acpi_remove(struct platform_device *pdev)

@@ -50,7 +50,6 @@
 /*standard module options for ALSA. This module supports only one card*/
 static int hdmi_card_index = SNDRV_DEFAULT_IDX1;
 static char *hdmi_card_id = SNDRV_DEFAULT_STR1;
-static bool single_port;
 
 module_param_named(index, hdmi_card_index, int, 0444);
 MODULE_PARM_DESC(index,
@@ -58,9 +57,6 @@ MODULE_PARM_DESC(index,
 module_param_named(id, hdmi_card_id, charp, 0444);
 MODULE_PARM_DESC(id,
 		"ID string for INTEL Intel HDMI Audio controller.");
-module_param(single_port, bool, 0444);
-MODULE_PARM_DESC(single_port,
-		"Single-port mode (for compatibility)");
 
 /*
  * ELD SA bits in the CEA Speaker Allocation data block
@@ -290,6 +286,7 @@ static void had_reset_audio(struct snd_intelhad *intelhaddata)
 static int had_prog_status_reg(struct snd_pcm_substream *substream,
 			struct snd_intelhad *intelhaddata)
 {
+	union aud_cfg cfg_val = {.regval = 0};
 	union aud_ch_status_0 ch_stat0 = {.regval = 0};
 	union aud_ch_status_1 ch_stat1 = {.regval = 0};
 
@@ -297,6 +294,7 @@ static int had_prog_status_reg(struct snd_pcm_substream *substream,
 					  IEC958_AES0_NONAUDIO) >> 1;
 	ch_stat0.regx.clk_acc = (intelhaddata->aes_bits &
 					  IEC958_AES3_CON_CLOCK) >> 4;
+	cfg_val.regx.val_bit = ch_stat0.regx.lpcm_id;
 
 	switch (substream->runtime->rate) {
 	case AUD_SAMPLE_RATE_32:
@@ -1581,11 +1579,7 @@ static irqreturn_t display_pipe_interrupt_handler(int irq, void *dev_id)
 static void notify_audio_lpe(struct platform_device *pdev, int port)
 {
 	struct snd_intelhad_card *card_ctx = platform_get_drvdata(pdev);
-	struct snd_intelhad *ctx;
-
-	ctx = &card_ctx->pcm_ctx[single_port ? 0 : port];
-	if (single_port)
-		ctx->port = port;
+	struct snd_intelhad *ctx = &card_ctx->pcm_ctx[port];
 
 	schedule_work(&ctx->hdmi_audio_wq);
 }
@@ -1749,7 +1743,6 @@ static int hdmi_lpe_audio_probe(struct platform_device *pdev)
 {
 	struct snd_card *card;
 	struct snd_intelhad_card *card_ctx;
-	struct snd_intelhad *ctx;
 	struct snd_pcm *pcm;
 	struct intel_hdmi_lpe_audio_pdata *pdata;
 	int irq;
@@ -1794,21 +1787,6 @@ static int hdmi_lpe_audio_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, card_ctx);
 
-	card_ctx->num_pipes = pdata->num_pipes;
-	card_ctx->num_ports = single_port ? 1 : pdata->num_ports;
-
-	for_each_port(card_ctx, port) {
-		ctx = &card_ctx->pcm_ctx[port];
-		ctx->card_ctx = card_ctx;
-		ctx->dev = card_ctx->dev;
-		ctx->port = single_port ? -1 : port;
-		ctx->pipe = -1;
-
-		spin_lock_init(&ctx->had_spinlock);
-		mutex_init(&ctx->mutex);
-		INIT_WORK(&ctx->hdmi_audio_wq, had_audio_wq);
-	}
-
 	dev_dbg(&pdev->dev, "%s: mmio_start = 0x%x, mmio_end = 0x%x\n",
 		__func__, (unsigned int)res_mmio->start,
 		(unsigned int)res_mmio->end);
@@ -1838,12 +1816,21 @@ static int hdmi_lpe_audio_probe(struct platform_device *pdev)
 	init_channel_allocations();
 
 	card_ctx->num_pipes = pdata->num_pipes;
-	card_ctx->num_ports = single_port ? 1 : pdata->num_ports;
+	card_ctx->num_ports = pdata->num_ports;
 
 	for_each_port(card_ctx, port) {
+		struct snd_intelhad *ctx = &card_ctx->pcm_ctx[port];
 		int i;
 
-		ctx = &card_ctx->pcm_ctx[port];
+		ctx->card_ctx = card_ctx;
+		ctx->dev = card_ctx->dev;
+		ctx->port = port;
+		ctx->pipe = -1;
+
+		spin_lock_init(&ctx->had_spinlock);
+		mutex_init(&ctx->mutex);
+		INIT_WORK(&ctx->hdmi_audio_wq, had_audio_wq);
+
 		ret = snd_pcm_new(card, INTEL_HAD, port, MAX_PB_STREAMS,
 				  MAX_CAP_STREAMS, &pcm);
 		if (ret)
@@ -1852,7 +1839,7 @@ static int hdmi_lpe_audio_probe(struct platform_device *pdev)
 		/* setup private data which can be retrieved when required */
 		pcm->private_data = ctx;
 		pcm->info_flags = 0;
-		strlcpy(pcm->name, card->shortname, strlen(card->shortname));
+		strncpy(pcm->name, card->shortname, strlen(card->shortname));
 		/* setup the ops for playabck */
 		snd_pcm_set_ops(pcm, SNDRV_PCM_STREAM_PLAYBACK, &had_pcm_ops);
 
@@ -1900,6 +1887,7 @@ static int hdmi_lpe_audio_probe(struct platform_device *pdev)
 
 	pm_runtime_use_autosuspend(&pdev->dev);
 	pm_runtime_mark_last_busy(&pdev->dev);
+	pm_runtime_set_active(&pdev->dev);
 
 	dev_dbg(&pdev->dev, "%s: handle pending notification\n", __func__);
 	for_each_port(card_ctx, port) {

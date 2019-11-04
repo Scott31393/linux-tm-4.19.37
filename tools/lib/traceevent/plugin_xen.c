@@ -119,19 +119,19 @@ unsigned long long process_xen_hypercall_name(struct trace_seq *s,
 	return 0;
 }
 
-int TEP_PLUGIN_LOADER(struct tep_handle *pevent)
+int PEVENT_PLUGIN_LOADER(struct pevent *pevent)
 {
-	tep_register_print_function(pevent,
-				    process_xen_hypercall_name,
-				    TEP_FUNC_ARG_STRING,
-				    "xen_hypercall_name",
-				    TEP_FUNC_ARG_INT,
-				    TEP_FUNC_ARG_VOID);
+	pevent_register_print_function(pevent,
+				       process_xen_hypercall_name,
+				       PEVENT_FUNC_ARG_STRING,
+				       "xen_hypercall_name",
+				       PEVENT_FUNC_ARG_INT,
+				       PEVENT_FUNC_ARG_VOID);
 	return 0;
 }
 
-void TEP_PLUGIN_UNLOADER(struct tep_handle *pevent)
+void PEVENT_PLUGIN_UNLOADER(struct pevent *pevent)
 {
-	tep_unregister_print_function(pevent, process_xen_hypercall_name,
-				      "xen_hypercall_name");
+	pevent_unregister_print_function(pevent, process_xen_hypercall_name,
+					 "xen_hypercall_name");
 }

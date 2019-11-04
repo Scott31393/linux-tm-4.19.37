@@ -671,7 +671,7 @@ fail:
 static int wl1273_fm_suspend(struct wl1273_device *radio)
 {
 	struct wl1273_core *core = radio->core;
-	int r;
+	int r = 0;
 
 	/* Cannot go from OFF to SUSPENDED */
 	if (core->mode == WL1273_MODE_RX)
@@ -1089,14 +1089,14 @@ out:
 	return r;
 }
 
-static __poll_t wl1273_fm_fops_poll(struct file *file,
+static unsigned int wl1273_fm_fops_poll(struct file *file,
 					struct poll_table_struct *pts)
 {
 	struct wl1273_device *radio = video_get_drvdata(video_devdata(file));
 	struct wl1273_core *core = radio->core;
 
 	if (radio->owner && radio->owner != file)
-		return EPOLLERR;
+		return -EBUSY;
 
 	radio->owner = file;
 
@@ -1104,10 +1104,10 @@ static __poll_t wl1273_fm_fops_poll(struct file *file,
 		poll_wait(file, &radio->read_queue, pts);
 
 		if (radio->rd_index != radio->wr_index)
-			return EPOLLIN | EPOLLRDNORM;
+			return POLLIN | POLLRDNORM;
 
 	} else if (core->mode == WL1273_MODE_TX) {
-		return EPOLLOUT | EPOLLWRNORM;
+		return POLLOUT | POLLWRNORM;
 	}
 
 	return 0;
@@ -1330,7 +1330,7 @@ static int wl1273_fm_vidioc_s_input(struct file *file, void *priv,
 
 /**
  * wl1273_fm_set_tx_power() -	Set the transmission power value.
- * @radio:			A pointer to the device struct.
+ * @core:			A pointer to the device struct.
  * @power:			The new power value.
  */
 static int wl1273_fm_set_tx_power(struct wl1273_device *radio, u16 power)

@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * message.c - synchronous message handling
  *
  * Released under the GPLv2 only.
+ * SPDX-License-Identifier: GPL-2.0
  */
 
 #include <linux/pci.h>	/* for scatterlist macros */
@@ -18,7 +18,6 @@
 #include <linux/usb/cdc.h>
 #include <linux/usb/quirks.h>
 #include <linux/usb/hcd.h>	/* for usbcore internals */
-#include <linux/usb/of.h>
 #include <asm/byteorder.h>
 
 #include "usb.h"
@@ -269,11 +268,10 @@ static void sg_clean(struct usb_sg_request *io)
 
 static void sg_complete(struct urb *urb)
 {
-	unsigned long flags;
 	struct usb_sg_request *io = urb->context;
 	int status = urb->status;
 
-	spin_lock_irqsave(&io->lock, flags);
+	spin_lock(&io->lock);
 
 	/* In 2.5 we require hcds' endpoint queues not to progress after fault
 	 * reports, until the completion callback (this!) returns.  That lets
@@ -307,7 +305,7 @@ static void sg_complete(struct urb *urb)
 		 * unlink pending urbs so they won't rx/tx bad data.
 		 * careful: unlink can sometimes be synchronous...
 		 */
-		spin_unlock_irqrestore(&io->lock, flags);
+		spin_unlock(&io->lock);
 		for (i = 0, found = 0; i < io->entries; i++) {
 			if (!io->urbs[i])
 				continue;
@@ -324,7 +322,7 @@ static void sg_complete(struct urb *urb)
 			} else if (urb == io->urbs[i])
 				found = 1;
 		}
-		spin_lock_irqsave(&io->lock, flags);
+		spin_lock(&io->lock);
 	}
 
 	/* on the last completion, signal usb_sg_wait() */
@@ -333,7 +331,7 @@ static void sg_complete(struct urb *urb)
 	if (!io->count)
 		complete(&io->complete);
 
-	spin_unlock_irqrestore(&io->lock, flags);
+	spin_unlock(&io->lock);
 }
 
 
@@ -391,7 +389,7 @@ int usb_sg_init(struct usb_sg_request *io, struct usb_device *dev,
 	}
 
 	/* initialize all the urbs we'll use */
-	io->urbs = kmalloc_array(io->entries, sizeof(*io->urbs), mem_flags);
+	io->urbs = kmalloc(io->entries * sizeof(*io->urbs), mem_flags);
 	if (!io->urbs)
 		goto nomem;
 
@@ -782,7 +780,7 @@ static int usb_get_langid(struct usb_device *dev, unsigned char *tbuf)
 	 * deal with strings at all. Set string_langid to -1 in order to
 	 * prevent any string to be retrieved from the device */
 	if (err < 0) {
-		dev_info(&dev->dev, "string descriptor 0 read error: %d\n",
+		dev_err(&dev->dev, "string descriptor 0 read error: %d\n",
 					err);
 		dev->string_langid = -1;
 		return -EPIPE;
@@ -921,35 +919,10 @@ int usb_get_device_descriptor(struct usb_device *dev, unsigned int size)
 	return ret;
 }
 
-/*
- * usb_set_isoch_delay - informs the device of the packet transmit delay
- * @dev: the device whose delay is to be informed
- * Context: !in_interrupt()
- *
- * Since this is an optional request, we don't bother if it fails.
- */
-int usb_set_isoch_delay(struct usb_device *dev)
-{
-	/* skip hub devices */
-	if (dev->descriptor.bDeviceClass == USB_CLASS_HUB)
-		return 0;
-
-	/* skip non-SS/non-SSP devices */
-	if (dev->speed < USB_SPEED_SUPER)
-		return 0;
-
-	return usb_control_msg(dev, usb_sndctrlpipe(dev, 0),
-			USB_REQ_SET_ISOCH_DELAY,
-			USB_DIR_OUT | USB_TYPE_STANDARD | USB_RECIP_DEVICE,
-			dev->hub_delay, 0, NULL, 0,
-			USB_CTRL_SET_TIMEOUT);
-}
-
 /**
  * usb_get_status - issues a GET_STATUS call
  * @dev: the device whose status is being checked
- * @recip: USB_RECIP_*; for device, interface, or endpoint
- * @type: USB_STATUS_TYPE_*; for standard or PTM status types
+ * @type: USB_RECIP_*; for device, interface, or endpoint
  * @target: zero (for device), else interface or endpoint number
  * @data: pointer to two bytes of bitmap data
  * Context: !in_interrupt ()
@@ -968,58 +941,24 @@ int usb_set_isoch_delay(struct usb_device *dev)
  * Returns 0 and the status value in *@data (in host byte order) on success,
  * or else the status code from the underlying usb_control_msg() call.
  */
-int usb_get_status(struct usb_device *dev, int recip, int type, int target,
-		void *data)
+int usb_get_status(struct usb_device *dev, int type, int target, void *data)
 {
 	int ret;
-	void *status;
-	int length;
+	__le16 *status = kmalloc(sizeof(*status), GFP_KERNEL);
 
-	switch (type) {
-	case USB_STATUS_TYPE_STANDARD:
-		length = 2;
-		break;
-	case USB_STATUS_TYPE_PTM:
-		if (recip != USB_RECIP_DEVICE)
-			return -EINVAL;
-
-		length = 4;
-		break;
-	default:
-		return -EINVAL;
-	}
-
-	status =  kmalloc(length, GFP_KERNEL);
 	if (!status)
 		return -ENOMEM;
 
 	ret = usb_control_msg(dev, usb_rcvctrlpipe(dev, 0),
-		USB_REQ_GET_STATUS, USB_DIR_IN | recip, USB_STATUS_TYPE_STANDARD,
-		target, status, length, USB_CTRL_GET_TIMEOUT);
+		USB_REQ_GET_STATUS, USB_DIR_IN | type, 0, target, status,
+		sizeof(*status), USB_CTRL_GET_TIMEOUT);
 
-	switch (ret) {
-	case 4:
-		if (type != USB_STATUS_TYPE_PTM) {
-			ret = -EIO;
-			break;
-		}
-
-		*(u32 *) data = le32_to_cpu(*(__le32 *) status);
+	if (ret == 2) {
+		*(u16 *) data = le16_to_cpu(*status);
 		ret = 0;
-		break;
-	case 2:
-		if (type != USB_STATUS_TYPE_STANDARD) {
-			ret = -EIO;
-			break;
-		}
-
-		*(u16 *) data = le16_to_cpu(*(__le16 *) status);
-		ret = 0;
-		break;
-	default:
+	} else if (ret >= 0) {
 		ret = -EIO;
 	}
-
 	kfree(status);
 	return ret;
 }
@@ -1341,11 +1280,6 @@ void usb_enable_interface(struct usb_device *dev,
  * is submitted that needs that bandwidth.  Some other operating systems
  * allocate bandwidth early, when a configuration is chosen.
  *
- * xHCI reserves bandwidth and configures the alternate setting in
- * usb_hcd_alloc_bandwidth(). If it fails the original interface altsetting
- * may be disabled. Drivers cannot rely on any particular alternate
- * setting being in effect after a failure.
- *
  * This call is synchronous, and may not be used in an interrupt context.
  * Also, drivers must not change altsettings while urbs are scheduled for
  * endpoints in that interface; all such urbs must first be completed
@@ -1381,12 +1315,6 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 			 alternate);
 		return -EINVAL;
 	}
-	/*
-	 * usb3 hosts configure the interface in usb_hcd_alloc_bandwidth,
-	 * including freeing dropped endpoint ring buffers.
-	 * Make sure the interface endpoints are flushed before that
-	 */
-	usb_disable_interface(dev, iface, false);
 
 	/* Make sure we have enough bandwidth for this alternate interface.
 	 * Remove the current alt setting and add the new alt setting.
@@ -1396,7 +1324,7 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
 	 * so that the xHCI driver can recalculate the U1/U2 timeouts.
 	 */
 	if (usb_disable_lpm(dev)) {
-		dev_err(&iface->dev, "%s Failed to disable LPM\n", __func__);
+		dev_err(&iface->dev, "%s Failed to disable LPM\n.", __func__);
 		mutex_unlock(hcd->bandwidth_mutex);
 		return -ENOMEM;
 	}
@@ -1540,7 +1468,7 @@ int usb_reset_configuration(struct usb_device *dev)
 	 * that the xHCI driver can recalculate the U1/U2 timeouts.
 	 */
 	if (usb_disable_lpm(dev)) {
-		dev_err(&dev->dev, "%s Failed to disable LPM\n", __func__);
+		dev_err(&dev->dev, "%s Failed to disable LPM\n.", __func__);
 		mutex_unlock(hcd->bandwidth_mutex);
 		return -ENOMEM;
 	}
@@ -1624,7 +1552,6 @@ static void usb_release_interface(struct device *dev)
 
 	kref_put(&intfc->ref, usb_release_interface_cache);
 	usb_put_dev(interface_to_usbdev(intf));
-	of_node_put(dev->of_node);
 	kfree(intf);
 }
 
@@ -1836,8 +1763,8 @@ int usb_set_configuration(struct usb_device *dev, int configuration)
 	n = nintf = 0;
 	if (cp) {
 		nintf = cp->desc.bNumInterfaces;
-		new_interfaces = kmalloc_array(nintf, sizeof(*new_interfaces),
-					       GFP_NOIO);
+		new_interfaces = kmalloc(nintf * sizeof(*new_interfaces),
+				GFP_NOIO);
 		if (!new_interfaces)
 			return -ENOMEM;
 
@@ -1888,7 +1815,7 @@ free_interfaces:
 	 * timeouts.
 	 */
 	if (dev->actconfig && usb_disable_lpm(dev)) {
-		dev_err(&dev->dev, "%s Failed to disable LPM\n", __func__);
+		dev_err(&dev->dev, "%s Failed to disable LPM\n.", __func__);
 		mutex_unlock(hcd->bandwidth_mutex);
 		ret = -ENOMEM;
 		goto free_interfaces;
@@ -1910,7 +1837,6 @@ free_interfaces:
 		struct usb_interface_cache *intfc;
 		struct usb_interface *intf;
 		struct usb_host_interface *alt;
-		u8 ifnum;
 
 		cp->interface[i] = intf = new_interfaces[i];
 		intfc = cp->intf_cache[i];
@@ -1929,17 +1855,11 @@ free_interfaces:
 		if (!alt)
 			alt = &intf->altsetting[0];
 
-		ifnum = alt->desc.bInterfaceNumber;
-		intf->intf_assoc = find_iad(dev, cp, ifnum);
+		intf->intf_assoc =
+			find_iad(dev, cp, alt->desc.bInterfaceNumber);
 		intf->cur_altsetting = alt;
 		usb_enable_interface(dev, intf, true);
 		intf->dev.parent = &dev->dev;
-		if (usb_of_has_combined_node(dev)) {
-			device_set_of_node_from_dev(&intf->dev, &dev->dev);
-		} else {
-			intf->dev.of_node = usb_of_get_interface_node(dev,
-					configuration, ifnum);
-		}
 		intf->dev.driver = NULL;
 		intf->dev.bus = &usb_bus_type;
 		intf->dev.type = &usb_if_device_type;
@@ -1954,8 +1874,9 @@ free_interfaces:
 		intf->minor = -1;
 		device_initialize(&intf->dev);
 		pm_runtime_no_callbacks(&intf->dev);
-		dev_set_name(&intf->dev, "%d-%s:%d.%d", dev->bus->busnum,
-				dev->devpath, configuration, ifnum);
+		dev_set_name(&intf->dev, "%d-%s:%d.%d",
+			dev->bus->busnum, dev->devpath,
+			configuration, alt->desc.bInterfaceNumber);
 		usb_get_dev(dev);
 	}
 	kfree(new_interfaces);
@@ -1992,85 +1913,6 @@ free_interfaces:
 	if (cp->string == NULL &&
 			!(dev->quirks & USB_QUIRK_CONFIG_INTF_STRINGS))
 		cp->string = usb_cache_string(dev, cp->desc.iConfiguration);
-/* Uncomment this define to enable the HS Electrical Test support */
-#define DWC_HS_ELECT_TST 1
-#ifdef DWC_HS_ELECT_TST
-		/* Here we implement the HS Electrical Test support. The
-		 * tester uses a vendor ID of 0x1A0A to indicate we should
-		 * run a special test sequence. The product ID tells us
-		 * which sequence to run. We invoke the test sequence by
-		 * sending a non-standard SetFeature command to our root
-		 * hub port. Our dwc_otg_hcd_hub_control() routine will
-		 * recognize the command and perform the desired test
-		 * sequence.
-		 */
-		if (dev->descriptor.idVendor == 0x1A0A) {
-			/* HSOTG Electrical Test */
-			dev_warn(&dev->dev, "VID from HSOTG Electrical Test Fixture\n");
-
-			if (dev->bus && dev->bus->root_hub) {
-				struct usb_device *hdev = dev->bus->root_hub;
-				dev_warn(&dev->dev, "Got PID 0x%x\n", dev->descriptor.idProduct);
-
-				switch (dev->descriptor.idProduct) {
-				case 0x0101:	/* TEST_SE0_NAK */
-					dev_warn(&dev->dev, "TEST_SE0_NAK\n");
-					usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-							USB_REQ_SET_FEATURE, USB_RT_PORT,
-							USB_PORT_FEAT_TEST, 0x300, NULL, 0, HZ);
-					break;
-
-				case 0x0102:	/* TEST_J */
-					dev_warn(&dev->dev, "TEST_J\n");
-					usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-							USB_REQ_SET_FEATURE, USB_RT_PORT,
-							USB_PORT_FEAT_TEST, 0x100, NULL, 0, HZ);
-					break;
-
-				case 0x0103:	/* TEST_K */
-					dev_warn(&dev->dev, "TEST_K\n");
-					usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-							USB_REQ_SET_FEATURE, USB_RT_PORT,
-							USB_PORT_FEAT_TEST, 0x200, NULL, 0, HZ);
-					break;
-
-				case 0x0104:	/* TEST_PACKET */
-					dev_warn(&dev->dev, "TEST_PACKET\n");
-					usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-							USB_REQ_SET_FEATURE, USB_RT_PORT,
-							USB_PORT_FEAT_TEST, 0x400, NULL, 0, HZ);
-					break;
-
-				case 0x0105:	/* TEST_FORCE_ENABLE */
-					dev_warn(&dev->dev, "TEST_FORCE_ENABLE\n");
-					usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-							USB_REQ_SET_FEATURE, USB_RT_PORT,
-							USB_PORT_FEAT_TEST, 0x500, NULL, 0, HZ);
-					break;
-
-				case 0x0106:	/* HS_HOST_PORT_SUSPEND_RESUME */
-					dev_warn(&dev->dev, "HS_HOST_PORT_SUSPEND_RESUME\n");
-					usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-							USB_REQ_SET_FEATURE, USB_RT_PORT,
-							USB_PORT_FEAT_TEST, 0x600, NULL, 0, 40 * HZ);
-					break;
-
-				case 0x0107:	/* SINGLE_STEP_GET_DEVICE_DESCRIPTOR setup */
-					dev_warn(&dev->dev, "SINGLE_STEP_GET_DEVICE_DESCRIPTOR setup\n");
-					usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-							USB_REQ_SET_FEATURE, USB_RT_PORT,
-							USB_PORT_FEAT_TEST, 0x700, NULL, 0, 40 * HZ);
-					break;
-
-				case 0x0108:	/* SINGLE_STEP_GET_DEVICE_DESCRIPTOR execute */
-					dev_warn(&dev->dev, "SINGLE_STEP_GET_DEVICE_DESCRIPTOR execute\n");
-					usb_control_msg(hdev, usb_sndctrlpipe(hdev, 0),
-							USB_REQ_SET_FEATURE, USB_RT_PORT,
-							USB_PORT_FEAT_TEST, 0x800, NULL, 0, 40 * HZ);
-				}
-			}
-		}
-#endif /* DWC_HS_ELECT_TST */
 
 	/* Now that the interfaces are installed, re-enable LPM. */
 	usb_unlocked_enable_lpm(dev);

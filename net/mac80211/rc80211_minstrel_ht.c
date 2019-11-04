@@ -669,7 +669,7 @@ minstrel_aggr_check(struct ieee80211_sta *pubsta, struct sk_buff *skb)
 	if (unlikely(skb->protocol == cpu_to_be16(ETH_P_PAE)))
 		return;
 
-	tid = ieee80211_get_tid(hdr);
+	tid = *ieee80211_get_qos_ctl(hdr) & IEEE80211_QOS_CTL_TID_MASK;
 	if (likely(sta->ampdu_mlme.tid_tx[tid]))
 		return;
 
@@ -1313,11 +1313,11 @@ minstrel_ht_alloc_sta(void *priv, struct ieee80211_sta *sta, gfp_t gfp)
 	if (!msp)
 		return NULL;
 
-	msp->ratelist = kcalloc(max_rates, sizeof(struct minstrel_rate), gfp);
+	msp->ratelist = kzalloc(sizeof(struct minstrel_rate) * max_rates, gfp);
 	if (!msp->ratelist)
 		goto error;
 
-	msp->sample_table = kmalloc_array(max_rates, SAMPLE_COLUMNS, gfp);
+	msp->sample_table = kmalloc(SAMPLE_COLUMNS * max_rates, gfp);
 	if (!msp->sample_table)
 		goto error1;
 

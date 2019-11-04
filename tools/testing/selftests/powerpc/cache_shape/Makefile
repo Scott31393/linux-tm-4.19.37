@@ -5,7 +5,6 @@ all: $(TEST_PROGS)
 
 $(TEST_PROGS): ../harness.c ../utils.c
 
-top_srcdir = ../../../../..
 include ../../lib.mk
 
 clean:

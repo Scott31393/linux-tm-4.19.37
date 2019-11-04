@@ -243,13 +243,13 @@ out:
 	return err ? err : buf - ubuf;
 }
 
-static __poll_t mce_chrdev_poll(struct file *file, poll_table *wait)
+static unsigned int mce_chrdev_poll(struct file *file, poll_table *wait)
 {
 	poll_wait(file, &mce_chrdev_wait, wait);
 	if (READ_ONCE(mcelog.next))
-		return EPOLLIN | EPOLLRDNORM;
+		return POLLIN | POLLRDNORM;
 	if (!mce_apei_read_done && apei_check_mce())
-		return EPOLLIN | EPOLLRDNORM;
+		return POLLIN | POLLRDNORM;
 	return 0;
 }
 

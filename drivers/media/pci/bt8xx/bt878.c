@@ -40,8 +40,8 @@
 #include <linux/vmalloc.h>
 #include <linux/init.h>
 
-#include <media/dmxdev.h>
-#include <media/dvbdev.h>
+#include "dmxdev.h"
+#include "dvbdev.h"
 #include "bt878.h"
 #include "dst_priv.h"
 

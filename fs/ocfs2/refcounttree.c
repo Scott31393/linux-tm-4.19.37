@@ -573,7 +573,7 @@ static int ocfs2_create_refcount_tree(struct inode *inode,
 	BUG_ON(ocfs2_is_refcount_inode(inode));
 
 	trace_ocfs2_create_refcount_tree(
-		(unsigned long long)oi->ip_blkno);
+		(unsigned long long)OCFS2_I(inode)->ip_blkno);
 
 	ret = ocfs2_reserve_new_metadata_blocks(osb, 1, &meta_ac);
 	if (ret) {
@@ -2946,7 +2946,6 @@ int ocfs2_duplicate_clusters_by_page(handle_t *handle,
 		if (map_end & (PAGE_SIZE - 1))
 			to = map_end & (PAGE_SIZE - 1);
 
-retry:
 		page = find_or_create_page(mapping, page_index, GFP_NOFS);
 		if (!page) {
 			ret = -ENOMEM;
@@ -2955,18 +2954,11 @@ retry:
 		}
 
 		/*
-		 * In case PAGE_SIZE <= CLUSTER_SIZE, we do not expect a dirty
-		 * page, so write it back.
+		 * In case PAGE_SIZE <= CLUSTER_SIZE, This page
+		 * can't be dirtied before we CoW it out.
 		 */
-		if (PAGE_SIZE <= OCFS2_SB(sb)->s_clustersize) {
-			if (PageDirty(page)) {
-				/*
-				 * write_on_page will unlock the page on return
-				 */
-				ret = write_one_page(page);
-				goto retry;
-			}
-		}
+		if (PAGE_SIZE <= OCFS2_SB(sb)->s_clustersize)
+			BUG_ON(PageDirty(page));
 
 		if (!PageUptodate(page)) {
 			ret = block_read_full_page(page, ocfs2_get_block);
@@ -3367,7 +3359,7 @@ static int ocfs2_replace_cow(struct ocfs2_cow_context *context)
 	unsigned int ext_flags;
 	struct ocfs2_super *osb = OCFS2_SB(inode->i_sb);
 
-	if (!ocfs2_refcount_tree(osb)) {
+	if (!ocfs2_refcount_tree(OCFS2_SB(inode->i_sb))) {
 		return ocfs2_error(inode->i_sb, "Inode %lu want to use refcount tree, but the feature bit is not set in the super block\n",
 				   inode->i_ino);
 	}
@@ -3715,7 +3707,7 @@ int ocfs2_add_refcount_flag(struct inode *inode,
 	trace_ocfs2_add_refcount_flag(ref_blocks, credits);
 
 	if (ref_blocks) {
-		ret = ocfs2_reserve_new_metadata_blocks(osb,
+		ret = ocfs2_reserve_new_metadata_blocks(OCFS2_SB(inode->i_sb),
 							ref_blocks, &meta_ac);
 		if (ret) {
 			mlog_errno(ret);
@@ -4716,23 +4708,22 @@ out:
 
 /* Lock an inode and grab a bh pointing to the inode. */
 static int ocfs2_reflink_inodes_lock(struct inode *s_inode,
-				     struct buffer_head **bh_s,
+				     struct buffer_head **bh1,
 				     struct inode *t_inode,
-				     struct buffer_head **bh_t)
+				     struct buffer_head **bh2)
 {
-	struct inode *inode1 = s_inode;
-	struct inode *inode2 = t_inode;
+	struct inode *inode1;
+	struct inode *inode2;
 	struct ocfs2_inode_info *oi1;
 	struct ocfs2_inode_info *oi2;
-	struct buffer_head *bh1 = NULL;
-	struct buffer_head *bh2 = NULL;
 	bool same_inode = (s_inode == t_inode);
-	bool need_swap = (inode1->i_ino > inode2->i_ino);
 	int status;
 
 	/* First grab the VFS and rw locks. */
 	lock_two_nondirectories(s_inode, t_inode);
-	if (need_swap)
+	inode1 = s_inode;
+	inode2 = t_inode;
+	if (inode1->i_ino > inode2->i_ino)
 		swap(inode1, inode2);
 
 	status = ocfs2_rw_lock(inode1, 1);
@@ -4755,13 +4746,17 @@ static int ocfs2_reflink_inodes_lock(struct inode *s_inode,
 	trace_ocfs2_double_lock((unsigned long long)oi1->ip_blkno,
 				(unsigned long long)oi2->ip_blkno);
 
+	if (*bh1)
+		*bh1 = NULL;
+	if (*bh2)
+		*bh2 = NULL;
+
 	/* We always want to lock the one with the lower lockid first. */
 	if (oi1->ip_blkno > oi2->ip_blkno)
 		mlog_errno(-ENOLCK);
 
 	/* lock id1 */
-	status = ocfs2_inode_lock_nested(inode1, &bh1, 1,
-					 OI_LS_REFLINK_TARGET);
+	status = ocfs2_inode_lock_nested(inode1, bh1, 1, OI_LS_REFLINK_TARGET);
 	if (status < 0) {
 		if (status != -ENOENT)
 			mlog_errno(status);
@@ -4770,35 +4765,26 @@ static int ocfs2_reflink_inodes_lock(struct inode *s_inode,
 
 	/* lock id2 */
 	if (!same_inode) {
-		status = ocfs2_inode_lock_nested(inode2, &bh2, 1,
+		status = ocfs2_inode_lock_nested(inode2, bh2, 1,
 						 OI_LS_REFLINK_TARGET);
 		if (status < 0) {
 			if (status != -ENOENT)
 				mlog_errno(status);
 			goto out_cl1;
 		}
-	} else {
-		bh2 = bh1;
-	}
-
-	/*
-	 * If we swapped inode order above, we have to swap the buffer heads
-	 * before passing them back to the caller.
-	 */
-	if (need_swap)
-		swap(bh1, bh2);
-	*bh_s = bh1;
-	*bh_t = bh2;
+	} else
+		*bh2 = *bh1;
 
 	trace_ocfs2_double_lock_end(
-			(unsigned long long)oi1->ip_blkno,
-			(unsigned long long)oi2->ip_blkno);
+			(unsigned long long)OCFS2_I(inode1)->ip_blkno,
+			(unsigned long long)OCFS2_I(inode2)->ip_blkno);
 
 	return 0;
 
 out_cl1:
 	ocfs2_inode_unlock(inode1, 1);
-	brelse(bh1);
+	brelse(*bh1);
+	*bh1 = NULL;
 out_rw2:
 	ocfs2_rw_unlock(inode2, 1);
 out_i2:

@@ -235,9 +235,8 @@ struct ib_fmr_pool *ib_create_fmr_pool(struct ib_pd             *pd,
 
 	if (params->cache) {
 		pool->cache_bucket =
-			kmalloc_array(IB_FMR_HASH_SIZE,
-				      sizeof(*pool->cache_bucket),
-				      GFP_KERNEL);
+			kmalloc(IB_FMR_HASH_SIZE * sizeof *pool->cache_bucket,
+				GFP_KERNEL);
 		if (!pool->cache_bucket) {
 			ret = -ENOMEM;
 			goto out_free_pool;
@@ -389,11 +388,13 @@ int ib_flush_fmr_pool(struct ib_fmr_pool *pool)
 EXPORT_SYMBOL(ib_flush_fmr_pool);
 
 /**
- * ib_fmr_pool_map_phys - Map an FMR from an FMR pool.
- * @pool_handle: FMR pool to allocate FMR from
- * @page_list: List of pages to map
- * @list_len: Number of pages in @page_list
- * @io_virtual_address: I/O virtual address for new FMR
+ * ib_fmr_pool_map_phys -
+ * @pool:FMR pool to allocate FMR from
+ * @page_list:List of pages to map
+ * @list_len:Number of pages in @page_list
+ * @io_virtual_address:I/O virtual address for new FMR
+ *
+ * Map an FMR from an FMR pool.
  */
 struct ib_pool_fmr *ib_fmr_pool_map_phys(struct ib_fmr_pool *pool_handle,
 					 u64                *page_list,

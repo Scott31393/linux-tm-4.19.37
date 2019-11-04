@@ -50,13 +50,7 @@ static int set_up_temporary_text_mapping(pgd_t *pgd)
 {
 	pmd_t *pmd;
 	pud_t *pud;
-	p4d_t *p4d = NULL;
-	pgprot_t pgtable_prot = __pgprot(_KERNPG_TABLE);
-	pgprot_t pmd_text_prot = __pgprot(__PAGE_KERNEL_LARGE_EXEC);
-
-	/* Filter out unsupported __PAGE_KERNEL* bits: */
-	pgprot_val(pmd_text_prot) &= __default_kernel_pte_mask;
-	pgprot_val(pgtable_prot)  &= __default_kernel_pte_mask;
+	p4d_t *p4d;
 
 	/*
 	 * The new mapping only has to cover the page containing the image
@@ -72,7 +66,7 @@ static int set_up_temporary_text_mapping(pgd_t *pgd)
 	 * tables used by the image kernel.
 	 */
 
-	if (pgtable_l5_enabled()) {
+	if (IS_ENABLED(CONFIG_X86_5LEVEL)) {
 		p4d = (p4d_t *)get_safe_page(GFP_ATOMIC);
 		if (!p4d)
 			return -ENOMEM;
@@ -87,19 +81,15 @@ static int set_up_temporary_text_mapping(pgd_t *pgd)
 		return -ENOMEM;
 
 	set_pmd(pmd + pmd_index(restore_jump_address),
-		__pmd((jump_address_phys & PMD_MASK) | pgprot_val(pmd_text_prot)));
+		__pmd((jump_address_phys & PMD_MASK) | __PAGE_KERNEL_LARGE_EXEC));
 	set_pud(pud + pud_index(restore_jump_address),
-		__pud(__pa(pmd) | pgprot_val(pgtable_prot)));
-	if (p4d) {
-		p4d_t new_p4d = __p4d(__pa(pud) | pgprot_val(pgtable_prot));
-		pgd_t new_pgd = __pgd(__pa(p4d) | pgprot_val(pgtable_prot));
-
-		set_p4d(p4d + p4d_index(restore_jump_address), new_p4d);
-		set_pgd(pgd + pgd_index(restore_jump_address), new_pgd);
+		__pud(__pa(pmd) | _KERNPG_TABLE));
+	if (IS_ENABLED(CONFIG_X86_5LEVEL)) {
+		set_p4d(p4d + p4d_index(restore_jump_address), __p4d(__pa(pud) | _KERNPG_TABLE));
+		set_pgd(pgd + pgd_index(restore_jump_address), __pgd(__pa(p4d) | _KERNPG_TABLE));
 	} else {
 		/* No p4d for 4-level paging: point the pgd to the pud page table */
-		pgd_t new_pgd = __pgd(__pa(pud) | pgprot_val(pgtable_prot));
-		set_pgd(pgd + pgd_index(restore_jump_address), new_pgd);
+		set_pgd(pgd + pgd_index(restore_jump_address), __pgd(__pa(pud) | _KERNPG_TABLE));
 	}
 
 	return 0;
@@ -233,35 +223,29 @@ struct restore_data_record {
  */
 static int get_e820_md5(struct e820_table *table, void *buf)
 {
-	struct crypto_shash *tfm;
-	struct shash_desc *desc;
+	struct scatterlist sg;
+	struct crypto_ahash *tfm;
 	int size;
 	int ret = 0;
 
-	tfm = crypto_alloc_shash("md5", 0, 0);
+	tfm = crypto_alloc_ahash("md5", 0, CRYPTO_ALG_ASYNC);
 	if (IS_ERR(tfm))
 		return -ENOMEM;
 
-	desc = kmalloc(sizeof(struct shash_desc) + crypto_shash_descsize(tfm),
-		       GFP_KERNEL);
-	if (!desc) {
-		ret = -ENOMEM;
-		goto free_tfm;
+	{
+		AHASH_REQUEST_ON_STACK(req, tfm);
+		size = offsetof(struct e820_table, entries) + sizeof(struct e820_entry) * table->nr_entries;
+		ahash_request_set_tfm(req, tfm);
+		sg_init_one(&sg, (u8 *)table, size);
+		ahash_request_set_callback(req, 0, NULL, NULL);
+		ahash_request_set_crypt(req, &sg, buf, size);
+
+		if (crypto_ahash_digest(req))
+			ret = -EINVAL;
+		ahash_request_zero(req);
 	}
+	crypto_free_ahash(tfm);
 
-	desc->tfm = tfm;
-	desc->flags = 0;
-
-	size = offsetof(struct e820_table, entries) +
-		sizeof(struct e820_entry) * table->nr_entries;
-
-	if (crypto_shash_digest(desc, (u8 *)table, size, buf))
-		ret = -EINVAL;
-
-	kzfree(desc);
-
-free_tfm:
-	crypto_free_shash(tfm);
 	return ret;
 }
 

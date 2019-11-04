@@ -892,7 +892,7 @@ rpc_free_client(struct rpc_clnt *clnt)
 /*
  * Free an RPC client
  */
-static struct rpc_clnt *
+static struct rpc_clnt * 
 rpc_free_auth(struct rpc_clnt *clnt)
 {
 	if (clnt->cl_auth == NULL)
@@ -965,20 +965,10 @@ out:
 }
 EXPORT_SYMBOL_GPL(rpc_bind_new_program);
 
-void rpc_task_release_transport(struct rpc_task *task)
-{
-	struct rpc_xprt *xprt = task->tk_xprt;
-
-	if (xprt) {
-		task->tk_xprt = NULL;
-		xprt_put(xprt);
-	}
-}
-EXPORT_SYMBOL_GPL(rpc_task_release_transport);
-
 void rpc_task_release_client(struct rpc_task *task)
 {
 	struct rpc_clnt *clnt = task->tk_client;
+	struct rpc_xprt *xprt = task->tk_xprt;
 
 	if (clnt != NULL) {
 		/* Remove from client task list */
@@ -989,14 +979,12 @@ void rpc_task_release_client(struct rpc_task *task)
 
 		rpc_release_client(clnt);
 	}
-	rpc_task_release_transport(task);
-}
 
-static
-void rpc_task_set_transport(struct rpc_task *task, struct rpc_clnt *clnt)
-{
-	if (!task->tk_xprt)
-		task->tk_xprt = xprt_iter_get_next(&clnt->cl_xpi);
+	if (xprt != NULL) {
+		task->tk_xprt = NULL;
+
+		xprt_put(xprt);
+	}
 }
 
 static
@@ -1004,7 +992,8 @@ void rpc_task_set_client(struct rpc_task *task, struct rpc_clnt *clnt)
 {
 
 	if (clnt != NULL) {
-		rpc_task_set_transport(task, clnt);
+		if (task->tk_xprt == NULL)
+			task->tk_xprt = xprt_iter_get_next(&clnt->cl_xpi);
 		task->tk_client = clnt;
 		atomic_inc(&clnt->cl_count);
 		if (clnt->cl_softrtry)
@@ -1242,7 +1231,7 @@ static const struct sockaddr_in6 rpc_in6addr_loopback = {
  * negative errno is returned.
  */
 static int rpc_sockname(struct net *net, struct sockaddr *sap, size_t salen,
-			struct sockaddr *buf)
+			struct sockaddr *buf, int buflen)
 {
 	struct socket *sock;
 	int err;
@@ -1280,7 +1269,7 @@ static int rpc_sockname(struct net *net, struct sockaddr *sap, size_t salen,
 		goto out_release;
 	}
 
-	err = kernel_getsockname(sock, buf);
+	err = kernel_getsockname(sock, buf, &buflen);
 	if (err < 0) {
 		dprintk("RPC:       getsockname failed (%d)\n", err);
 		goto out_release;
@@ -1364,7 +1353,7 @@ int rpc_localaddr(struct rpc_clnt *clnt, struct sockaddr *buf, size_t buflen)
 	rcu_read_unlock();
 
 	rpc_set_port(sap, 0);
-	err = rpc_sockname(net, sap, salen, buf);
+	err = rpc_sockname(net, sap, salen, buf, buflen);
 	put_net(net);
 	if (err != 0)
 		/* Couldn't discover local address, return ANYADDR */
@@ -1385,6 +1374,22 @@ rpc_setbufsize(struct rpc_clnt *clnt, unsigned int sndsize, unsigned int rcvsize
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL_GPL(rpc_setbufsize);
+
+/**
+ * rpc_protocol - Get transport protocol number for an RPC client
+ * @clnt: RPC client to query
+ *
+ */
+int rpc_protocol(struct rpc_clnt *clnt)
+{
+	int protocol;
+
+	rcu_read_lock();
+	protocol = rcu_dereference(clnt->cl_xprt)->prot;
+	rcu_read_unlock();
+	return protocol;
+}
+EXPORT_SYMBOL_GPL(rpc_protocol);
 
 /**
  * rpc_net_ns - Get the network namespace for this RPC client
@@ -1486,6 +1491,7 @@ rpc_restart_call(struct rpc_task *task)
 }
 EXPORT_SYMBOL_GPL(rpc_restart_call);
 
+#if IS_ENABLED(CONFIG_SUNRPC_DEBUG)
 const char
 *rpc_proc_name(const struct rpc_task *task)
 {
@@ -1499,6 +1505,7 @@ const char
 	} else
 		return "no proc";
 }
+#endif
 
 /*
  * 0.  Initial state
@@ -1512,7 +1519,6 @@ call_start(struct rpc_task *task)
 	struct rpc_clnt	*clnt = task->tk_client;
 	int idx = task->tk_msg.rpc_proc->p_statidx;
 
-	trace_rpc_request(task);
 	dprintk("RPC: %5u call_start %s%d proc %s (%s)\n", task->tk_pid,
 			clnt->cl_program->name, clnt->cl_vers,
 			rpc_proc_name(task),
@@ -1523,7 +1529,6 @@ call_start(struct rpc_task *task)
 		clnt->cl_program->version[clnt->cl_vers]->counts[idx]++;
 	clnt->cl_stats->rpccnt++;
 	task->tk_action = call_reserve;
-	rpc_task_set_transport(task, clnt);
 }
 
 /*
@@ -1558,7 +1563,6 @@ call_reserveresult(struct rpc_task *task)
 	task->tk_status = 0;
 	if (status >= 0) {
 		if (task->tk_rqstp) {
-			xprt_request_init(task);
 			task->tk_action = call_refresh;
 			return;
 		}
@@ -1582,7 +1586,6 @@ call_reserveresult(struct rpc_task *task)
 	switch (status) {
 	case -ENOMEM:
 		rpc_delay(task, HZ >> 2);
-		/* fall through */
 	case -EAGAIN:	/* woken up; retry */
 		task->tk_action = call_retry_reserve;
 		return;
@@ -1644,13 +1647,10 @@ call_refreshresult(struct rpc_task *task)
 		/* Use rate-limiting and a max number of retries if refresh
 		 * had status 0 but failed to update the cred.
 		 */
-		/* fall through */
 	case -ETIMEDOUT:
 		rpc_delay(task, 3*HZ);
-		/* fall through */
 	case -EAGAIN:
 		status = -EACCES;
-		/* fall through */
 	case -EKEYEXPIRED:
 		if (!task->tk_cred_retry)
 			break;
@@ -1838,7 +1838,6 @@ call_bind_status(struct rpc_task *task)
 	case -ECONNABORTED:
 	case -ENOTCONN:
 	case -EHOSTDOWN:
-	case -ENETDOWN:
 	case -EHOSTUNREACH:
 	case -ENETUNREACH:
 	case -ENOBUFS:
@@ -1900,7 +1899,7 @@ call_connect_status(struct rpc_task *task)
 
 	dprint_status(task);
 
-	trace_rpc_connect_status(task);
+	trace_rpc_connect_status(task, status);
 	task->tk_status = 0;
 	switch (status) {
 	case -ECONNREFUSED:
@@ -1912,10 +1911,8 @@ call_connect_status(struct rpc_task *task)
 			task->tk_action = call_bind;
 			return;
 		}
-		/* fall through */
 	case -ECONNRESET:
 	case -ECONNABORTED:
-	case -ENETDOWN:
 	case -ENETUNREACH:
 	case -EHOSTUNREACH:
 	case -EADDRINUSE:
@@ -1927,7 +1924,6 @@ call_connect_status(struct rpc_task *task)
 			break;
 		/* retry with existing socket, after a delay */
 		rpc_delay(task, 3*HZ);
-		/* fall through */
 	case -EAGAIN:
 		/* Check for timeouts before looping back to call_bind */
 	case -ETIMEDOUT:
@@ -1992,15 +1988,13 @@ call_transmit(struct rpc_task *task)
 static void
 call_transmit_status(struct rpc_task *task)
 {
-	struct rpc_xprt *xprt = task->tk_rqstp->rq_xprt;
 	task->tk_action = call_status;
 
 	/*
 	 * Common case: success.  Force the compiler to put this
-	 * test first.  Or, if any error and xprt_close_wait,
-	 * release the xprt lock so the socket can close.
+	 * test first.
 	 */
-	if (task->tk_status == 0 || xprt_close_wait(xprt)) {
+	if (task->tk_status == 0) {
 		xprt_end_transmit(task);
 		rpc_task_force_reencode(task);
 		return;
@@ -2023,19 +2017,14 @@ call_transmit_status(struct rpc_task *task)
 		 */
 	case -ECONNREFUSED:
 	case -EHOSTDOWN:
-	case -ENETDOWN:
 	case -EHOSTUNREACH:
 	case -ENETUNREACH:
 	case -EPERM:
 		if (RPC_IS_SOFTCONN(task)) {
 			xprt_end_transmit(task);
-			if (!task->tk_msg.rpc_proc->p_proc)
-				trace_xprt_ping(task->tk_xprt,
-						task->tk_status);
 			rpc_exit(task, task->tk_status);
 			break;
 		}
-		/* fall through */
 	case -ECONNRESET:
 	case -ECONNABORTED:
 	case -EADDRINUSE:
@@ -2076,7 +2065,6 @@ call_bc_transmit(struct rpc_task *task)
 	switch (task->tk_status) {
 	case 0:
 		/* Success */
-	case -ENETDOWN:
 	case -EHOSTDOWN:
 	case -EHOSTUNREACH:
 	case -ENETUNREACH:
@@ -2130,9 +2118,6 @@ call_status(struct rpc_task *task)
 	struct rpc_rqst	*req = task->tk_rqstp;
 	int		status;
 
-	if (!task->tk_msg.rpc_proc->p_proc)
-		trace_xprt_ping(task->tk_xprt, task->tk_status);
-
 	if (req->rq_reply_bytes_recvd > 0 && !req->rq_bytes_sent)
 		task->tk_status = req->rq_reply_bytes_recvd;
 
@@ -2148,7 +2133,6 @@ call_status(struct rpc_task *task)
 	task->tk_status = 0;
 	switch(status) {
 	case -EHOSTDOWN:
-	case -ENETDOWN:
 	case -EHOSTUNREACH:
 	case -ENETUNREACH:
 	case -EPERM:
@@ -2161,7 +2145,6 @@ call_status(struct rpc_task *task)
 		 * were a timeout.
 		 */
 		rpc_delay(task, 3*HZ);
-		/* fall through */
 	case -ETIMEDOUT:
 		task->tk_action = call_timeout;
 		break;
@@ -2169,17 +2152,14 @@ call_status(struct rpc_task *task)
 	case -ECONNRESET:
 	case -ECONNABORTED:
 		rpc_force_rebind(clnt);
-		/* fall through */
 	case -EADDRINUSE:
 		rpc_delay(task, 3*HZ);
-		/* fall through */
 	case -EPIPE:
 	case -ENOTCONN:
 		task->tk_action = call_bind;
 		break;
 	case -ENOBUFS:
 		rpc_delay(task, HZ>>2);
-		/* fall through */
 	case -EAGAIN:
 		task->tk_action = call_transmit;
 		break;

@@ -628,12 +628,12 @@ The keyctl syscall functions are:
      defined key type will return its data as is. If a key type does not
      implement this function, error EOPNOTSUPP will result.
 
-     If the specified buffer is too small, then the size of the buffer required
-     will be returned.  Note that in this case, the contents of the buffer may
-     have been overwritten in some undefined way.
+     As much of the data as can be fitted into the buffer will be copied to
+     userspace if the buffer pointer is not NULL.
 
-     Otherwise, on success, the function will return the amount of data copied
-     into the buffer.
+     On a successful return, the function will always return the amount of data
+     available rather than the amount copied.
+
 
   *  Instantiate a partially constructed key::
 

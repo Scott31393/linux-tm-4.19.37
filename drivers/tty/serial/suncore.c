@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: GPL-2.0
 /* suncore.c
  *
  * Common SUN serial routines.  Based entirely
@@ -112,7 +111,6 @@ void sunserial_console_termios(struct console *con, struct device_node *uart_dp)
 		mode = of_get_property(dp, mode_prop, NULL);
 		if (!mode)
 			mode = "9600,8,n,1,-";
-		of_node_put(dp);
 	}
 
 	cflag = CREAD | HUPCL | CLOCAL;

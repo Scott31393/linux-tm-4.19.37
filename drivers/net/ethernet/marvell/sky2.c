@@ -46,7 +46,6 @@
 #include <linux/mii.h>
 #include <linux/of_device.h>
 #include <linux/of_net.h>
-#include <linux/dmi.h>
 
 #include <asm/irq.h>
 
@@ -94,7 +93,7 @@ static int copybreak __read_mostly = 128;
 module_param(copybreak, int, 0);
 MODULE_PARM_DESC(copybreak, "Receive copy threshold");
 
-static int disable_msi = -1;
+static int disable_msi = 0;
 module_param(disable_msi, int, 0);
 MODULE_PARM_DESC(disable_msi, "Disable Message Signaled Interrupt (MSI)");
 
@@ -2975,9 +2974,9 @@ static int sky2_rx_hung(struct net_device *dev)
 	}
 }
 
-static void sky2_watchdog(struct timer_list *t)
+static void sky2_watchdog(unsigned long arg)
 {
-	struct sky2_hw *hw = from_timer(hw, t, watchdog_timer);
+	struct sky2_hw *hw = (struct sky2_hw *) arg;
 
 	/* Check for lost IRQ once a second */
 	if (sky2_read32(hw, B0_ISRC)) {
@@ -4288,7 +4287,7 @@ static int sky2_vpd_wait(const struct sky2_hw *hw, int cap, u16 busy)
 			dev_err(&hw->pdev->dev, "VPD cycle timed out\n");
 			return -ETIMEDOUT;
 		}
-		msleep(1);
+		mdelay(1);
 	}
 
 	return 0;
@@ -4668,7 +4667,7 @@ static int sky2_device_event(struct notifier_block *unused,
 		break;
 
 	case NETDEV_UP:
-		sky2->debugfs = debugfs_create_file(dev->name, 0444,
+		sky2->debugfs = debugfs_create_file(dev->name, S_IRUGO,
 						    sky2_debug, dev,
 						    &sky2_debug_fops);
 		if (IS_ERR(sky2->debugfs))
@@ -4932,24 +4931,6 @@ static const char *sky2_name(u8 chipid, char *buf, int sz)
 	return buf;
 }
 
-static const struct dmi_system_id msi_blacklist[] = {
-	{
-		.ident = "Dell Inspiron 1545",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
-			DMI_MATCH(DMI_PRODUCT_NAME, "Inspiron 1545"),
-		},
-	},
-	{
-		.ident = "Gateway P-79",
-		.matches = {
-			DMI_MATCH(DMI_SYS_VENDOR, "Gateway"),
-			DMI_MATCH(DMI_PRODUCT_NAME, "P-79"),
-		},
-	},
-	{}
-};
-
 static int sky2_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
 	struct net_device *dev, *dev1;
@@ -5061,9 +5042,6 @@ static int sky2_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_out_free_pci;
 	}
 
-	if (disable_msi == -1)
-		disable_msi = !!dmi_check_system(msi_blacklist);
-
 	if (!disable_msi && pci_enable_msi(pdev) == 0) {
 		err = sky2_test_msi(hw);
 		if (err) {
@@ -5105,11 +5083,11 @@ static int sky2_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		sky2_show_addr(dev1);
 	}
 
-	timer_setup(&hw->watchdog_timer, sky2_watchdog, 0);
+	setup_timer(&hw->watchdog_timer, sky2_watchdog, (unsigned long) hw);
 	INIT_WORK(&hw->restart_work, sky2_restart);
 
 	pci_set_drvdata(pdev, hw);
-	pdev->d3_delay = 300;
+	pdev->d3_delay = 200;
 
 	return 0;
 

@@ -15,4 +15,7 @@
 
 #include <asm-generic/siginfo.h>
 
+#undef NSIGTRAP
+#define NSIGTRAP	4
+
 #endif	/* _ASM_POWERPC_SIGINFO_H */

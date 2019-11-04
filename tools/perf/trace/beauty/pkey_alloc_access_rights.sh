@@ -1,6 +1,6 @@
 #!/bin/sh
 
-[ $# -eq 1 ] && header_dir=$1 || header_dir=tools/include/uapi/asm-generic/
+header_dir=$1
 
 printf "static const char *pkey_alloc_access_rights[] = {\n"
 regex='^[[:space:]]*#[[:space:]]*define[[:space:]]+PKEY_([[:alnum:]_]+)[[:space:]]+(0x[[:xdigit:]]+)[[:space:]]*'

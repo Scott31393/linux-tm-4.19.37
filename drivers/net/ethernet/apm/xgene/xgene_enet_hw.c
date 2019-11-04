@@ -836,19 +836,19 @@ static void xgene_enet_adjust_link(struct net_device *ndev)
 #ifdef CONFIG_ACPI
 static struct acpi_device *acpi_phy_find_device(struct device *dev)
 {
-	struct fwnode_reference_args args;
+	struct acpi_reference_args args;
 	struct fwnode_handle *fw_node;
 	int status;
 
 	fw_node = acpi_fwnode_handle(ACPI_COMPANION(dev));
 	status = acpi_node_get_property_reference(fw_node, "phy-handle", 0,
 						  &args);
-	if (ACPI_FAILURE(status) || !is_acpi_device_node(args.fwnode)) {
+	if (ACPI_FAILURE(status)) {
 		dev_dbg(dev, "No matching phy in ACPI table\n");
 		return NULL;
 	}
 
-	return to_acpi_device_node(args.fwnode);
+	return args.adev;
 }
 #endif
 

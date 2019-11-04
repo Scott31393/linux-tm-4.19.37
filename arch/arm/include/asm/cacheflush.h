@@ -35,7 +35,7 @@
  *	Start addresses are inclusive and end addresses are exclusive;
  *	start addresses should be rounded down, end addresses up.
  *
- *	See Documentation/core-api/cachetlb.rst for more information.
+ *	See Documentation/cachetlb.txt for more information.
  *	Please note that the implementation of these, and the required
  *	effects are cache-type (VIVT/VIPT/PIPT) specific.
  *
@@ -94,21 +94,6 @@
  *	DMA Cache Coherency
  *	===================
  *
- *	dma_inv_range(start, end)
- *
- *		Invalidate (discard) the specified virtual address range.
- *		May not write back any entries.  If 'start' or 'end'
- *		are not cache line aligned, those lines must be written
- *		back.
- *		- start  - virtual start address
- *		- end    - virtual end address
- *
- *	dma_clean_range(start, end)
- *
- *		Clean (write back) the specified virtual address range.
- *		- start  - virtual start address
- *		- end    - virtual end address
- *
  *	dma_flush_range(start, end)
  *
  *		Clean and invalidate the specified virtual address range.
@@ -130,8 +115,6 @@ struct cpu_cache_fns {
 	void (*dma_map_area)(const void *, size_t, int);
 	void (*dma_unmap_area)(const void *, size_t, int);
 
-	void (*dma_inv_range)(const void *, const void *);
-	void (*dma_clean_range)(const void *, const void *);
 	void (*dma_flush_range)(const void *, const void *);
 } __no_randomize_layout;
 
@@ -157,8 +140,6 @@ extern struct cpu_cache_fns cpu_cache;
  * is visible to DMA, or data written by DMA to system memory is
  * visible to the CPU.
  */
-#define dmac_inv_range			cpu_cache.dma_inv_range
-#define dmac_clean_range		cpu_cache.dma_clean_range
 #define dmac_flush_range		cpu_cache.dma_flush_range
 
 #else
@@ -178,8 +159,6 @@ extern void __cpuc_flush_dcache_area(void *, size_t);
  * is visible to DMA, or data written by DMA to system memory is
  * visible to the CPU.
  */
-extern void dmac_inv_range(const void *, const void *);
-extern void dmac_clean_range(const void *, const void *);
 extern void dmac_flush_range(const void *, const void *);
 
 #endif
@@ -339,8 +318,10 @@ static inline void flush_anon_page(struct vm_area_struct *vma,
 #define ARCH_HAS_FLUSH_KERNEL_DCACHE_PAGE
 extern void flush_kernel_dcache_page(struct page *);
 
-#define flush_dcache_mmap_lock(mapping)		xa_lock_irq(&mapping->i_pages)
-#define flush_dcache_mmap_unlock(mapping)	xa_unlock_irq(&mapping->i_pages)
+#define flush_dcache_mmap_lock(mapping) \
+	spin_lock_irq(&(mapping)->tree_lock)
+#define flush_dcache_mmap_unlock(mapping) \
+	spin_unlock_irq(&(mapping)->tree_lock)
 
 #define flush_icache_user_range(vma,page,addr,len) \
 	flush_dcache_page(page)

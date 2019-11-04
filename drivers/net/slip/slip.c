@@ -106,8 +106,8 @@ static int slip_esc6(unsigned char *p, unsigned char *d, int len);
 static void slip_unesc6(struct slip *sl, unsigned char c);
 #endif
 #ifdef CONFIG_SLIP_SMART
-static void sl_keepalive(struct timer_list *t);
-static void sl_outfill(struct timer_list *t);
+static void sl_keepalive(unsigned long sls);
+static void sl_outfill(unsigned long sls);
 static int sl_ioctl(struct net_device *dev, struct ifreq *rq, int cmd);
 #endif
 
@@ -731,7 +731,7 @@ static void sl_sync(void)
 
 
 /* Find a free SLIP channel, and link in this `tty' line. */
-static struct slip *sl_alloc(void)
+static struct slip *sl_alloc(dev_t line)
 {
 	int i;
 	char name[IFNAMSIZ];
@@ -763,8 +763,12 @@ static struct slip *sl_alloc(void)
 	sl->mode        = SL_MODE_DEFAULT;
 #ifdef CONFIG_SLIP_SMART
 	/* initialize timer_list struct */
-	timer_setup(&sl->keepalive_timer, sl_keepalive, 0);
-	timer_setup(&sl->outfill_timer, sl_outfill, 0);
+	init_timer(&sl->keepalive_timer);
+	sl->keepalive_timer.data = (unsigned long)sl;
+	sl->keepalive_timer.function = sl_keepalive;
+	init_timer(&sl->outfill_timer);
+	sl->outfill_timer.data = (unsigned long)sl;
+	sl->outfill_timer.function = sl_outfill;
 #endif
 	slip_devs[i] = dev;
 	return sl;
@@ -809,7 +813,7 @@ static int slip_open(struct tty_struct *tty)
 
 	/* OK.  Find a free SLIP channel to use. */
 	err = -ENFILE;
-	sl = sl_alloc();
+	sl = sl_alloc(tty_devnum(tty));
 	if (sl == NULL)
 		goto err_exit;
 
@@ -1307,7 +1311,7 @@ static int __init slip_init(void)
 	printk(KERN_INFO "SLIP linefill/keepalive option.\n");
 #endif
 
-	slip_devs = kcalloc(slip_maxdev, sizeof(struct net_device *),
+	slip_devs = kzalloc(sizeof(struct net_device *)*slip_maxdev,
 								GFP_KERNEL);
 	if (!slip_devs)
 		return -ENOMEM;
@@ -1388,9 +1392,9 @@ module_exit(slip_exit);
  * added by Stanislav Voronyi. All changes before marked VSV
  */
 
-static void sl_outfill(struct timer_list *t)
+static void sl_outfill(unsigned long sls)
 {
-	struct slip *sl = from_timer(sl, t, outfill_timer);
+	struct slip *sl = (struct slip *)sls;
 
 	spin_lock(&sl->lock);
 
@@ -1419,9 +1423,9 @@ out:
 	spin_unlock(&sl->lock);
 }
 
-static void sl_keepalive(struct timer_list *t)
+static void sl_keepalive(unsigned long sls)
 {
-	struct slip *sl = from_timer(sl, t, keepalive_timer);
+	struct slip *sl = (struct slip *)sls;
 
 	spin_lock(&sl->lock);
 

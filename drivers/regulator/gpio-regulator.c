@@ -172,8 +172,8 @@ of_get_gpio_regulator_config(struct device *dev, struct device_node *np,
 
 	if (ret > 0) {
 		config->nr_gpios = ret;
-		config->gpios = devm_kcalloc(dev,
-					config->nr_gpios, sizeof(struct gpio),
+		config->gpios = devm_kzalloc(dev,
+					sizeof(struct gpio) * config->nr_gpios,
 					GFP_KERNEL);
 		if (!config->gpios)
 			return ERR_PTR(-ENOMEM);
@@ -196,7 +196,6 @@ of_get_gpio_regulator_config(struct device *dev, struct device_node *np,
 				break;
 			}
 			config->gpios[i].gpio = gpio;
-			config->gpios[i].label = config->supply_name;
 			if (proplen > 0) {
 				of_property_read_u32_index(np, "gpios-states",
 							   i, &ret);
@@ -214,9 +213,9 @@ of_get_gpio_regulator_config(struct device *dev, struct device_node *np,
 		return ERR_PTR(-EINVAL);
 	}
 
-	config->states = devm_kcalloc(dev,
-				proplen / 2,
-				sizeof(struct gpio_regulator_state),
+	config->states = devm_kzalloc(dev,
+				sizeof(struct gpio_regulator_state)
+				* (proplen / 2),
 				GFP_KERNEL);
 	if (!config->states)
 		return ERR_PTR(-ENOMEM);

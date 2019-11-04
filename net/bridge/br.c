@@ -34,7 +34,6 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 	struct net_device *dev = netdev_notifier_info_to_dev(ptr);
 	struct net_bridge_port *p;
 	struct net_bridge *br;
-	bool notified = false;
 	bool changed_addr;
 	int err;
 
@@ -53,7 +52,7 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 
 	switch (event) {
 	case NETDEV_CHANGEMTU:
-		br_mtu_auto_adjust(br);
+		dev_set_mtu(br->dev, br_min_mtu(br));
 		break;
 
 	case NETDEV_CHANGEADDR:
@@ -68,7 +67,7 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 		break;
 
 	case NETDEV_CHANGE:
-		br_port_carrier_check(p, &notified);
+		br_port_carrier_check(p);
 		break;
 
 	case NETDEV_FEAT_CHANGE:
@@ -77,10 +76,8 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 
 	case NETDEV_DOWN:
 		spin_lock_bh(&br->lock);
-		if (br->dev->flags & IFF_UP) {
+		if (br->dev->flags & IFF_UP)
 			br_stp_disable_port(p);
-			notified = true;
-		}
 		spin_unlock_bh(&br->lock);
 		break;
 
@@ -88,7 +85,6 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 		if (netif_running(br->dev) && netif_oper_up(dev)) {
 			spin_lock_bh(&br->lock);
 			br_stp_enable_port(p);
-			notified = true;
 			spin_unlock_bh(&br->lock);
 		}
 		break;
@@ -114,9 +110,9 @@ static int br_device_event(struct notifier_block *unused, unsigned long event, v
 	}
 
 	/* Events that may cause spanning tree to refresh */
-	if (!notified && (event == NETDEV_CHANGEADDR || event == NETDEV_UP ||
-			  event == NETDEV_CHANGE || event == NETDEV_DOWN))
-		br_ifinfo_notify(RTM_NEWLINK, NULL, p);
+	if (event == NETDEV_CHANGEADDR || event == NETDEV_UP ||
+	    event == NETDEV_CHANGE || event == NETDEV_DOWN)
+		br_ifinfo_notify(RTM_NEWLINK, p);
 
 	return NOTIFY_DONE;
 }
@@ -145,7 +141,7 @@ static int br_switchdev_event(struct notifier_block *unused,
 	case SWITCHDEV_FDB_ADD_TO_BRIDGE:
 		fdb_info = ptr;
 		err = br_fdb_external_learn_add(br, p, fdb_info->addr,
-						fdb_info->vid, false);
+						fdb_info->vid);
 		if (err) {
 			err = notifier_from_errno(err);
 			break;
@@ -156,7 +152,7 @@ static int br_switchdev_event(struct notifier_block *unused,
 	case SWITCHDEV_FDB_DEL_TO_BRIDGE:
 		fdb_info = ptr;
 		err = br_fdb_external_learn_del(br, p, fdb_info->addr,
-						fdb_info->vid, false);
+						fdb_info->vid);
 		if (err)
 			err = notifier_from_errno(err);
 		break;

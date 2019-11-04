@@ -202,15 +202,11 @@ static int create_of_modalias(struct acpi_device *acpi_dev, char *modalias,
 {
 	struct acpi_buffer buf = { ACPI_ALLOCATE_BUFFER };
 	const union acpi_object *of_compatible, *obj;
-	acpi_status status;
 	int len, count;
 	int i, nval;
 	char *c;
 
-	status = acpi_get_name(acpi_dev->handle, ACPI_SINGLE_NAME, &buf);
-	if (ACPI_FAILURE(status))
-		return -ENODEV;
-
+	acpi_get_name(acpi_dev->handle, ACPI_SINGLE_NAME, &buf);
 	/* DT strings are all in lower case */
 	for (c = buf.pointer; *c != '\0'; c++)
 		*c = tolower(*c);
@@ -361,7 +357,7 @@ static ssize_t real_power_state_show(struct device *dev,
 	return sprintf(buf, "%s\n", acpi_power_state_string(state));
 }
 
-static DEVICE_ATTR_RO(real_power_state);
+static DEVICE_ATTR(real_power_state, 0444, real_power_state_show, NULL);
 
 static ssize_t power_state_show(struct device *dev,
 				struct device_attribute *attr, char *buf)
@@ -371,7 +367,7 @@ static ssize_t power_state_show(struct device *dev,
 	return sprintf(buf, "%s\n", acpi_power_state_string(adev->power.state));
 }
 
-static DEVICE_ATTR_RO(power_state);
+static DEVICE_ATTR(power_state, 0444, power_state_show, NULL);
 
 static ssize_t
 acpi_eject_store(struct device *d, struct device_attribute *attr,
@@ -466,7 +462,7 @@ static ssize_t description_show(struct device *dev,
 
 	return result;
 }
-static DEVICE_ATTR_RO(description);
+static DEVICE_ATTR(description, 0444, description_show, NULL);
 
 static ssize_t
 acpi_device_sun_show(struct device *dev, struct device_attribute *attr,

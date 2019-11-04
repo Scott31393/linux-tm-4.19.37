@@ -1,6 +1,14 @@
-// SPDX-License-Identifier: GPL-2.0
 /*
  * Copyright (c) 2016, Linaro Ltd
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 and
+ * only version 2 as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
  */
 
 #include <linux/io.h>
@@ -21,6 +29,8 @@
 #include <linux/workqueue.h>
 #include <linux/list.h>
 
+#include <linux/delay.h>
+#include <linux/rpmsg.h>
 #include <linux/rpmsg/qcom_glink.h>
 
 #include "qcom_glink_native.h"
@@ -175,9 +185,6 @@ static void glink_smem_tx_write(struct qcom_glink_pipe *glink_pipe,
 	if (head >= pipe->native.length)
 		head -= pipe->native.length;
 
-	/* Ensure ordering of fifo and head update */
-	wmb();
-
 	*pipe->head = cpu_to_le32(head);
 }
 
@@ -209,7 +216,6 @@ struct qcom_glink *qcom_glink_smem_register(struct device *parent,
 	ret = device_register(dev);
 	if (ret) {
 		pr_err("failed to register glink edge\n");
-		put_device(dev);
 		return ERR_PTR(ret);
 	}
 
@@ -292,7 +298,7 @@ struct qcom_glink *qcom_glink_smem_register(struct device *parent,
 	return glink;
 
 err_put_dev:
-	device_unregister(dev);
+	put_device(dev);
 
 	return ERR_PTR(ret);
 }

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2013 Texas Instruments Incorporated - http://www.ti.com/
+ * Copyright (C) 2013 Texas Instruments
  * Author: Tomi Valkeinen <tomi.valkeinen@ti.com>
  *
  * This program is free software; you can redistribute it and/or modify it
@@ -44,6 +44,7 @@ struct device_node *dss_of_port_get_parent_device(struct device_node *port)
 
 	return NULL;
 }
+EXPORT_SYMBOL_GPL(dss_of_port_get_parent_device);
 
 u32 dss_of_port_get_port_number(struct device_node *port)
 {
@@ -56,6 +57,7 @@ u32 dss_of_port_get_port_number(struct device_node *port)
 
 	return reg;
 }
+EXPORT_SYMBOL_GPL(dss_of_port_get_port_number);
 
 struct omap_dss_device *
 omapdss_of_find_source_for_first_ep(struct device_node *node)

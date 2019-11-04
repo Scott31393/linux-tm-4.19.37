@@ -39,7 +39,7 @@
 #include <media/drv-intf/msp3400.h>
 #include <media/tuner.h>
 
-#include <media/dvb_frontend.h>
+#include "dvb_frontend.h"
 
 #include "cx231xx-vbi.h"
 
@@ -199,10 +199,10 @@ static inline void print_err_status(struct cx231xx *dev, int packet, int status)
 
 	switch (status) {
 	case -ENOENT:
-		errmsg = "unlinked synchronously";
+		errmsg = "unlinked synchronuously";
 		break;
 	case -ECONNRESET:
-		errmsg = "unlinked asynchronously";
+		errmsg = "unlinked asynchronuously";
 		break;
 	case -ENOSR:
 		errmsg = "Buffer error (overrun)";
@@ -1756,8 +1756,6 @@ static int cx231xx_v4l2_open(struct file *filp)
 	case VFL_TYPE_RADIO:
 		radio = 1;
 		break;
-	default:
-		return -EINVAL;
 	}
 
 	cx231xx_videodbg("open dev=%s type=%s users=%d\n",
@@ -1941,7 +1939,7 @@ static int cx231xx_close(struct file *filp)
 		}
 
 		/* Save some power by putting tuner to sleep */
-		call_all(dev, tuner, standby);
+		call_all(dev, core, s_power, 0);
 
 		/* do this before setting alternate! */
 		if (dev->USE_ISO)
@@ -2008,29 +2006,29 @@ cx231xx_v4l2_read(struct file *filp, char __user *buf, size_t count,
  * cx231xx_v4l2_poll()
  * will allocate buffers when called for the first time
  */
-static __poll_t cx231xx_v4l2_poll(struct file *filp, poll_table *wait)
+static unsigned int cx231xx_v4l2_poll(struct file *filp, poll_table *wait)
 {
-	__poll_t req_events = poll_requested_events(wait);
+	unsigned long req_events = poll_requested_events(wait);
 	struct cx231xx_fh *fh = filp->private_data;
 	struct cx231xx *dev = fh->dev;
-	__poll_t res = 0;
+	unsigned res = 0;
 	int rc;
 
 	rc = check_dev(dev);
 	if (rc < 0)
-		return EPOLLERR;
+		return POLLERR;
 
 	rc = res_get(fh);
 
 	if (unlikely(rc < 0))
-		return EPOLLERR;
+		return POLLERR;
 
 	if (v4l2_event_pending(&fh->fh))
-		res |= EPOLLPRI;
+		res |= POLLPRI;
 	else
 		poll_wait(filp, &fh->fh.wait, wait);
 
-	if (!(req_events & (EPOLLIN | EPOLLRDNORM)))
+	if (!(req_events & (POLLIN | POLLRDNORM)))
 		return res;
 
 	if ((V4L2_BUF_TYPE_VIDEO_CAPTURE == fh->type) ||
@@ -2040,7 +2038,7 @@ static __poll_t cx231xx_v4l2_poll(struct file *filp, poll_table *wait)
 		mutex_unlock(&dev->lock);
 		return res;
 	}
-	return res | EPOLLERR;
+	return res | POLLERR;
 }
 
 /*

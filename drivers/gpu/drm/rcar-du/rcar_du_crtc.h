@@ -21,8 +21,6 @@
 #include <drm/drmP.h>
 #include <drm/drm_crtc.h>
 
-#include <media/vsp1.h>
-
 struct rcar_du_group;
 struct rcar_du_vsp;
 
@@ -71,19 +69,6 @@ struct rcar_du_crtc {
 
 #define to_rcar_crtc(c)	container_of(c, struct rcar_du_crtc, crtc)
 
-/**
- * struct rcar_du_crtc_state - Driver-specific CRTC state
- * @state: base DRM CRTC state
- * @crc: CRC computation configuration
- */
-struct rcar_du_crtc_state {
-	struct drm_crtc_state state;
-
-	struct vsp1_du_crc_config crc;
-};
-
-#define to_rcar_crtc_state(s) container_of(s, struct rcar_du_crtc_state, state)
-
 enum rcar_du_output {
 	RCAR_DU_OUTPUT_DPAD0,
 	RCAR_DU_OUTPUT_DPAD1,
@@ -95,8 +80,7 @@ enum rcar_du_output {
 	RCAR_DU_OUTPUT_MAX,
 };
 
-int rcar_du_crtc_create(struct rcar_du_group *rgrp, unsigned int swindex,
-			unsigned int hwindex);
+int rcar_du_crtc_create(struct rcar_du_group *rgrp, unsigned int index);
 void rcar_du_crtc_suspend(struct rcar_du_crtc *rcrtc);
 void rcar_du_crtc_resume(struct rcar_du_crtc *rcrtc);
 

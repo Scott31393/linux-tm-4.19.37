@@ -85,8 +85,9 @@ ia64_do_page_fault (unsigned long address, unsigned long isr, struct pt_regs *re
 	int signal = SIGSEGV, code = SEGV_MAPERR;
 	struct vm_area_struct *vma, *prev_vma;
 	struct mm_struct *mm = current->mm;
+	struct siginfo si;
 	unsigned long mask;
-	vm_fault_t fault;
+	int fault;
 	unsigned int flags = FAULT_FLAG_ALLOW_RETRY | FAULT_FLAG_KILLABLE;
 
 	mask = ((((isr >> IA64_ISR_X_BIT) & 1UL) << VM_EXEC_BIT)
@@ -248,9 +249,6 @@ retry:
 		return;
 	}
 	if (user_mode(regs)) {
-		struct siginfo si;
-
-		clear_siginfo(&si);
 		si.si_signo = signal;
 		si.si_errno = 0;
 		si.si_code = code;
