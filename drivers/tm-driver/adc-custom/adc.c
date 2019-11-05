@@ -7,7 +7,7 @@
 #define ADS1115_CONV_REG 0x00
 #define ADS1115_CONFIG_REG 0x0001
 #define ADS1115_INIT_CONF 0xc101   
-#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c\n"
 #define BYTE_TO_BINARY(byte)  \
   (byte & 0x80 ? '1' : '0'), \
   (byte & 0x40 ? '1' : '0'), \
@@ -53,8 +53,9 @@ static ssize_t ads1115_config(struct device *dev,
 	if(ret < 0){
 		return ret;
 	}
+	*buf = (__u16)ret;
 
-	return sprintf(buf, "Initial Configuration is: %x",  ADS1115_INIT_CONF);
+	return sprintf(buf, "Initial Configuration is: %x \n",  ADS1115_INIT_CONF);
 }
 
 
