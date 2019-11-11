@@ -29,7 +29,7 @@ static ssize_t ads1115_v_read(struct device *dev,
     struct adc_ads1115 *adc = dev_get_drvdata(dev);
     struct i2c_client *client = adc->client;
     __s32 ret;
-    ret = i2c_smbus_read_byte_data(client, ADS1115_CONV_REG);
+    ret = i2c_smbus_read_word_data(client, ADS1115_CONV_REG);
     
     if(ret < 0){
         return ret;
@@ -49,7 +49,7 @@ static ssize_t ads1115_config(struct device *dev,
 	struct i2c_client *client = adc->client;
 	__s32 ret;
 
-	ret = i2c_smbus_write_byte_data(client, ADS1115_CONFIG_REG, ADS1115_INIT_CONF);
+	ret = i2c_smbus_write_word_data(client, ADS1115_CONFIG_REG, ADS1115_INIT_CONF);
 	if(ret < 0){
 		return ret;
 	}
