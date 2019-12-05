@@ -2,11 +2,17 @@
 #include <linux/module.h>
 #include <linux/i2c.h>
 #include <linux/sysfs.h>
+#include <linux/delay.h>
 
-
+/*Conversion register*/
 #define ADS1115_CONV_REG 0x00
-#define ADS1115_CONFIG_REG 0x0001
-#define ADS1115_INIT_CONF 0xc101   
+/*Configuration register*/
+#define ADS1115_CONFIG_REG 0x01
+
+/*FSR=±2.048 V, LSB SIZE=62.5 μV, MODE=CONTINUOS_CONVERSION*/
+#define ADS1115_INIT_CONV 0xc483  
+
+/*To print conversion in Binary */
 #define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
 #define BYTE_TO_BINARY(byte)  \
   (byte & 0x80 ? '1' : '0'), \
@@ -29,15 +35,27 @@ static ssize_t ads1115_v_read(struct device *dev,
     struct adc_ads1115 *adc = dev_get_drvdata(dev);
     struct i2c_client *client = adc->client;
     __s32 ret;
-    ret = i2c_smbus_read_byte_data(client, ADS1115_CONV_REG);
-    
+
+	
+	printk(KERN_DEBUG "CONFIG REG BEFORE : 0x%x \n", i2c_smbus_read_word_data(client, ADS1115_CONFIG_REG));
+	ret = i2c_smbus_write_word_data(client, ADS1115_CONFIG_REG, ADS1115_INIT_CONV);
+    mdelay(10);
+	if (ret<0)
+	{
+		printk(KERN_DEBUG "ERROR WRITING CONFIG: %x \n", ret);
+	}
+	printk(KERN_DEBUG "CONFIG REG AFTER : 0x%x \n", i2c_smbus_read_word_data(client, ADS1115_CONFIG_REG));
+	mdelay(10);
+	ret = i2c_smbus_read_word_data(client, ADS1115_CONV_REG);
+    printk(KERN_DEBUG "Voltage is: %d \n", i2c_smbus_read_word_data(client, ADS1115_CONV_REG));
     if(ret < 0){
         return ret;
     }
+	//ret = ((ret * 625)/1000000);
 
     *buf = (__u16)ret;
     
-    return sprintf(buf, "Actual voltage is: \n"  BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(ret));
+    return sprintf(buf, "Actual voltage is: %d \n", ret);
 
 }
 
@@ -49,12 +67,12 @@ static ssize_t ads1115_config(struct device *dev,
 	struct i2c_client *client = adc->client;
 	__s32 ret;
 
-	ret = i2c_smbus_write_byte_data(client, ADS1115_CONFIG_REG, ADS1115_INIT_CONF);
+	ret = i2c_smbus_write_word_data(client, ADS1115_CONFIG_REG, ADS1115_INIT_CONV);
 	if(ret < 0){
 		return ret;
 	}
 
-	return sprintf(buf, "Initial Configuration is: %x",  ADS1115_INIT_CONF);
+	return sprintf(buf, "Initial Configuration is: %x",  ADS1115_INIT_CONV);
 }
 
 
