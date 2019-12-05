@@ -37,21 +37,18 @@ static ssize_t ads1115_v_read(struct device *dev,
     __s32 ret;
 
 	
-	printk(KERN_DEBUG "CONFIG REG BEFORE : 0x%x \n", i2c_smbus_read_word_data(client, ADS1115_CONFIG_REG));
+
 	ret = i2c_smbus_write_word_data(client, ADS1115_CONFIG_REG, ADS1115_INIT_CONV);
     mdelay(10);
 	if (ret<0)
 	{
 		printk(KERN_DEBUG "ERROR WRITING CONFIG: %x \n", ret);
 	}
-	printk(KERN_DEBUG "CONFIG REG AFTER : 0x%x \n", i2c_smbus_read_word_data(client, ADS1115_CONFIG_REG));
-	mdelay(10);
 	ret = i2c_smbus_read_word_data(client, ADS1115_CONV_REG);
-    printk(KERN_DEBUG "Voltage is: %d \n", i2c_smbus_read_word_data(client, ADS1115_CONV_REG));
     if(ret < 0){
         return ret;
     }
-	//ret = ((ret * 625)/1000000);
+	ret = ((ret * 625)/1000000);
 
     *buf = (__u16)ret;
     
