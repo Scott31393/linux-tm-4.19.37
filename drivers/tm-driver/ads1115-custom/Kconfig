@@ -1,0 +1,10 @@
+#
+# ADC EXAMPLE DRIVER
+#
+
+
+config ADC_CUSTOM_TM_DRIVER
+	bool "Custom ADC Drivers Support"
+	help
+	  Custom ADC Drivers Support
+
