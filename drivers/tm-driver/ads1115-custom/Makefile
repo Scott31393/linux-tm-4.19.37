@@ -3,5 +3,5 @@
 # Makefile for the phy drivers.
 #
 
-obj-$(CONFIG_ADC_CUSTOM_TM_DRIVER)		+= adc.o
+obj-$(CONFIG_ADC_CUSTOM_TM_DRIVER)		+= ads1115.o
 

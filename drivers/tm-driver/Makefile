@@ -5,5 +5,4 @@
 
 
 obj-$(CONFIG_GPIO_TM_DRIVER)		+= gpio-tutorial/	
-obj-$(CONFIG_ADC_CUSTOM_TM_DRIVER)  += adc-custom/
-obj-$(CONFIG_USB_CUSTOM_TM_DRIVER)  += usb-custom/
+obj-$(CONFIG_ADC_CUSTOM_TM_DRIVER)  	+= ads1115-custom/
