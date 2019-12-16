@@ -1,0 +1,10 @@
+#
+# USB EXAMPLE DRIVER
+#
+
+config USB_CUSTOM_TM_DRIVER
+	bool "Custom USB Drivers Support"
+	help
+	  Custom USB Drivers Support
+
+
