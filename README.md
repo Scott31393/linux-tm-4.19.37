@@ -24,3 +24,7 @@ And dtb in:
 
 $ arch/arm64/boot/dts/broadcom/bcm2837-rpi-3-b-plus.dtb
 
+# Custom Driver Folder
+
+$ cd linux-tm-4.19.37/drivers/tm-driver/
+
